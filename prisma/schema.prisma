@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ConversationStep {
+  MAIN_MENU
+  ACTION_MENU
+  SELECT_EMPRESA
+  AWAITING_PHOTO
+  AWAITING_DESCRIPTION
+  AWAITING_INSPECT_DATE
+}
+
+model Usuario {
+  id        Int      @id @default(autoincrement()) @db.SmallInt
+  phoneE164 BigInt   @unique @map("PhoneE164") @db.BigInt
+  nome      String?  @map("Nome")
+  cargo     String?  @map("Cargo")
+  createdAt DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+
+  empresas UserEmpresa[]
+  entradas Entrada[]
+
+  @@map("Usuarios")
+}
+
+model Empresa {
+  id   BigInt  @id @default(autoincrement()) @db.BigInt
+  nome String?
+
+  usuarios UserEmpresa[]
+  entradas Entrada[]
+
+  @@map("Empresa")
+}
+
+model UserEmpresa {
+  userId    Int    @map("User_ID") @db.SmallInt
+  empresaId BigInt @map("Empresa_ID") @db.BigInt
+
+  usuario Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@id([userId, empresaId])
+  @@map("_UserEmpresa")
+}
+
+model Entrada {
+  id          BigInt   @id @default(autoincrement()) @db.BigInt
+  userId      Int      @map("User_id") @db.SmallInt
+  empresaId   BigInt?  @map("empresa_id") @db.BigInt
+  description String?  @map("Description")
+  createdAt   DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+  tipo        String?  @map("Tipo")
+
+  usuario Usuario       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  empresa Empresa?      @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  media   EntradaMedia[]
+
+  @@map("Entrada")
+}
+
+model EntradaMedia {
+  id        BigInt @id @default(autoincrement()) @db.BigInt
+  mediaUrl  String @map("MediaUrl")
+  entradaId BigInt @map("Entrada_id") @db.BigInt
+
+  entrada Entrada @relation(fields: [entradaId], references: [id], onDelete: Cascade)
+
+  @@map("_EntradaMedia")
+}
+
+model WhatsappConversationState {
+  id                BigInt           @id @default(autoincrement()) @db.BigInt
+  chatId            String           @unique @map("ChatId")
+  phoneE164         String           @map("PhoneE164")
+  step              ConversationStep @map("Step")
+  selectedTipo      String?          @map("SelectedTipo")
+  selectedEmpresaId BigInt?          @map("SelectedEmpresaId") @db.BigInt
+  pendingEntradaId  BigInt?          @map("PendingEntradaId") @db.BigInt
+  createdAt         DateTime         @default(now()) @map("CreatedAt") @db.Timestamptz(6)
+  updatedAt         DateTime         @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+
+  @@map("WhatsappConversationState")
+}

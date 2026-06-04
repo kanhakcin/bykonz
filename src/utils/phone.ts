@@ -1,0 +1,65 @@
+export function normalizePhoneFromChatId(chatId: string): string {
+  return chatId.split("@")[0]?.replace(/\D/g, "") ?? "";
+}
+
+export function extractPhoneFromWahaPayload(payload: {
+  from?: string;
+  chatId?: string;
+  _data?: Record<string, unknown>;
+}): string {
+  const candidates = [
+    readNestedString(payload, ["_data", "Info", "SenderAlt"]),
+    readNestedString(payload, ["_data", "SenderAlt"]),
+    readNestedString(payload, ["_data", "Info", "Sender"]),
+    readNestedString(payload, ["_data", "Sender"]),
+    payload.from,
+    payload.chatId
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || isLidJid(candidate)) {
+      continue;
+    }
+
+    const phoneDigits = normalizePhoneFromChatId(candidate);
+    if (phoneDigits) {
+      return phoneDigits;
+    }
+  }
+
+  return "";
+}
+
+export function readNestedString(source: unknown, path: string[]): string | undefined {
+  let current = source;
+
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+
+    current = current[key];
+  }
+
+  return typeof current === "string" && current.trim() ? current : undefined;
+}
+
+export function phoneDigitsToBigInt(phoneDigits: string): bigint | null {
+  if (!/^\d+$/.test(phoneDigits)) {
+    return null;
+  }
+
+  try {
+    return BigInt(phoneDigits);
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isLidJid(value: string): boolean {
+  return value.toLowerCase().includes("@lid");
+}

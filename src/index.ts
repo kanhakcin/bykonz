@@ -5,8 +5,9 @@ import { prisma } from "./lib/prisma";
 
 const config = loadConfig();
 const app = createApp(createConversationService(config));
+const PORT = process.env.PORT || 8080;
 
-const server = app.listen(config.port, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${config.port}`);
 });
 

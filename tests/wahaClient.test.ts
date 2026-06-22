@@ -35,4 +35,41 @@ describe("WahaClient", () => {
       }
     });
   });
+
+  it("sends a file via POST /api/sendFile with application/pdf", async () => {
+    const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new WahaClient("http://waha:3000", "secret", "default");
+
+    await client.sendFile(
+      "5511999@c.us",
+      { mimetype: "application/pdf", filename: "relatorio.pdf", data: "base64data" }
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith("http://waha:3000/api/sendFile", {
+      method: "POST",
+      headers: {
+        "X-Api-Key": "secret",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session: "default",
+        chatId: "5511999@c.us",
+        file: { mimetype: "application/pdf", filename: "relatorio.pdf", data: "base64data" },
+        caption: ""
+      })
+    });
+  });
+
+  it("throws when sendFile response is not ok", async () => {
+    const fetchMock = vi.fn(async () => new Response("Bad Request", { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new WahaClient("http://waha:3000", "secret", "default");
+
+    await expect(
+      client.sendFile("5511999@c.us", { mimetype: "application/pdf", filename: "r.pdf", data: "x" })
+    ).rejects.toThrow("400");
+  });
 });

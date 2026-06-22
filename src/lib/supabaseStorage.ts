@@ -1,9 +1,9 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { AppConfig } from "../config/env";
 import type { ObjectStorage } from "../services/conversationService";
 
 interface S3Sender {
-  send(command: PutObjectCommand): Promise<unknown>;
+  send(command: PutObjectCommand | GetObjectCommand): Promise<unknown>;
 }
 
 export class SupabaseObjectStorage implements ObjectStorage {
@@ -43,6 +43,31 @@ export class SupabaseObjectStorage implements ObjectStorage {
     } catch (error) {
       throw new Error(`Supabase S3 upload failed: ${formatStorageError(error)}`);
     }
+  }
+
+  async downloadPrivateObject(path: string): Promise<Buffer> {
+    let response: unknown;
+    try {
+      response = await this.client.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: path
+        })
+      );
+    } catch (error) {
+      throw new Error(`Supabase S3 download failed: ${formatStorageError(error)}`);
+    }
+
+    const body = (response as { Body?: unknown }).Body;
+    if (!body) {
+      throw new Error(`Supabase S3 download returned empty body for key: ${path}`);
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 }
 

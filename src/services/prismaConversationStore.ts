@@ -4,6 +4,7 @@ import type {
   ConversationStore,
   CreateEntradaInput,
   EmpresaRecord,
+  EntradaForReport,
   SaveConversationStateInput,
   UserRecord
 } from "./conversationService";
@@ -111,6 +112,40 @@ export class PrismaConversationStore implements ConversationStore {
       where: { id: entradaId },
       data: { description }
     });
+  }
+
+  async findEntradasForReport(input: {
+    empresaId: bigint;
+    tipo: string;
+    dateStart: Date;
+    dateEnd: Date;
+  }): Promise<EntradaForReport[]> {
+    const entradas = await this.prisma.entrada.findMany({
+      where: {
+        empresaId: input.empresaId,
+        tipo: input.tipo,
+        createdAt: {
+          gte: input.dateStart,
+          lt: input.dateEnd
+        }
+      },
+      include: {
+        empresa: { select: { nome: true } },
+        usuario: { select: { nome: true } },
+        media: { select: { mediaUrl: true } }
+      },
+      orderBy: { createdAt: "asc" }
+    });
+
+    return entradas.map((e) => ({
+      id: e.id,
+      description: e.description,
+      createdAt: e.createdAt,
+      tipo: e.tipo,
+      empresaNome: e.empresa?.nome ?? null,
+      usuarioNome: e.usuario.nome ?? null,
+      mediaUrls: e.media.map((m) => m.mediaUrl)
+    }));
   }
 }
 

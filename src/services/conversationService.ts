@@ -7,9 +7,21 @@ export type FlowStep =
   | "SELECT_EMPRESA"
   | "AWAITING_PHOTO"
   | "AWAITING_DESCRIPTION"
-  | "AWAITING_INSPECT_DATE";
+  | "AWAITING_INSPECT_DATE"
+  | "SELECT_EMPRESA_FOR_REPORT"
+  | "AWAITING_REPORT_DATE";
 
-export type EntryTipo = "Diario de obra" | "Manutencao";
+const ENTRY_TIPOS = [
+  "Diario de obra",
+  "Abrir nao conformidade",
+  "Inspecao de servico",
+  "Recebimento de material",
+  "Plano de manutencao",
+  "Programa sol",
+  "Treinamento"
+] as const;
+
+export type EntryTipo = (typeof ENTRY_TIPOS)[number];
 
 export interface UserRecord {
   id: number;
@@ -40,6 +52,24 @@ export interface CreateEntradaInput {
   description: string;
 }
 
+export interface EntradaForReport {
+  id: bigint;
+  description: string | null;
+  createdAt: Date;
+  tipo: string | null;
+  empresaNome: string | null;
+  usuarioNome: string | null;
+  mediaUrls: string[];
+}
+
+export interface ReportInput {
+  categoria: string;
+  empresaNome: string;
+  reportDate: string;
+  generatedAt: Date;
+  entradas: EntradaForReport[];
+}
+
 export interface ConversationStore {
   findUserByPhone(phoneDigits: string): Promise<UserRecord | null>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
@@ -49,10 +79,21 @@ export interface ConversationStore {
   createEntrada(input: CreateEntradaInput): Promise<{ id: bigint }>;
   addEntradaMedia(input: { entradaId: bigint; mediaUrl: string }): Promise<void>;
   updateEntradaDescription(entradaId: bigint, description: string): Promise<void>;
+  findEntradasForReport(input: {
+    empresaId: bigint;
+    tipo: string;
+    dateStart: Date;
+    dateEnd: Date;
+  }): Promise<EntradaForReport[]>;
 }
 
 export interface MessagingClient {
   sendText(chatId: string, text: string): Promise<void>;
+  sendFile(
+    chatId: string,
+    file: { mimetype: string; filename: string; data: string },
+    caption?: string
+  ): Promise<void>;
 }
 
 export interface MediaDownloader {
@@ -61,6 +102,11 @@ export interface MediaDownloader {
 
 export interface ObjectStorage {
   uploadPrivateObject(input: { path: string; body: Buffer; contentType: string }): Promise<void>;
+  downloadPrivateObject(path: string): Promise<Buffer>;
+}
+
+export interface PdfGenerator {
+  generateReport(input: ReportInput): Promise<Buffer>;
 }
 
 export interface ConversationServiceDeps {
@@ -68,16 +114,22 @@ export interface ConversationServiceDeps {
   messaging: MessagingClient;
   mediaDownloader: MediaDownloader;
   objectStorage: ObjectStorage;
+  pdfGenerator: PdfGenerator;
 }
 
 const TIPO_OPTIONS: Record<string, EntryTipo> = {
   "1": "Diario de obra",
-  "2": "Manutencao"
+  "2": "Abrir nao conformidade",
+  "3": "Inspecao de servico",
+  "4": "Recebimento de material",
+  "5": "Plano de manutencao",
+  "6": "Programa sol",
+  "7": "Treinamento"
 };
 
 const ACTION_OPTIONS = {
-  inspect: "1",
-  add: "2"
+  consulta: "1",
+  incluir: "2"
 };
 
 const RESET_COMMANDS = new Set(["0", "menu", "cancelar"]);
@@ -143,7 +195,13 @@ export class ConversationService {
         await this.handleDescription(chatId, state, text);
         return;
       case "AWAITING_INSPECT_DATE":
-        await this.handleInspectDate(chatId, text);
+        await this.resetToMenu(chatId, phoneE164);
+        return;
+      case "SELECT_EMPRESA_FOR_REPORT":
+        await this.handleEmpresaSelectionForReport(chatId, phoneE164, user.id, state, text);
+        return;
+      case "AWAITING_REPORT_DATE":
+        await this.handleReportDate(chatId, phoneE164, state, text);
         return;
     }
   }
@@ -196,20 +254,12 @@ export class ConversationService {
       return;
     }
 
-    if (text === ACTION_OPTIONS.inspect) {
-      await this.deps.store.saveState({
-        chatId,
-        phoneE164,
-        step: "AWAITING_INSPECT_DATE",
-        selectedTipo: tipo,
-        selectedEmpresaId: state.selectedEmpresaId ?? null,
-        pendingEntradaId: null
-      });
-      await this.deps.messaging.sendText(chatId, "Informe a data para inspecionar no formato DD/MM/AAAA.");
+    if (text === ACTION_OPTIONS.consulta) {
+      await this.handleConsulta(chatId, phoneE164, userId, state);
       return;
     }
 
-    if (text === ACTION_OPTIONS.add) {
+    if (text === ACTION_OPTIONS.incluir) {
       await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
       return;
     }
@@ -382,17 +432,138 @@ export class ConversationService {
     await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
   }
 
-  private async handleInspectDate(chatId: string, text: string): Promise<void> {
-    if (!text) {
-      await this.deps.messaging.sendText(chatId, "Informe a data para inspecionar no formato DD/MM/AAAA.");
+  private async handleConsulta(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
-    await this.deps.store.clearState(chatId);
-    await this.deps.messaging.sendText(
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    if (empresas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (empresas.length === 1) {
+      await this.deps.store.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_REPORT_DATE",
+        selectedTipo: tipo,
+        selectedEmpresaId: empresas[0].id,
+        pendingEntradaId: null
+      });
+      await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+      return;
+    }
+
+    await this.deps.store.saveState({
       chatId,
-      "Resumo em PDF ainda nao implementado. A data solicitada foi registrada para a proxima versao."
-    );
+      phoneE164,
+      step: "SELECT_EMPRESA_FOR_REPORT",
+      selectedTipo: tipo,
+      selectedEmpresaId: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+  }
+
+  private async handleEmpresaSelectionForReport(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    const selectedIndex = Number(text) - 1;
+    const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
+    if (!empresa) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      return;
+    }
+
+    await this.deps.store.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_REPORT_DATE",
+      selectedTipo: tipo,
+      selectedEmpresaId: empresa.id,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+  }
+
+  private async handleReportDate(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const dateRange = parseReportDate(text);
+    if (!dateRange) {
+      await this.deps.messaging.sendText(chatId, "Data invalida. Informe a data no formato DD/MM/AAAA.");
+      return;
+    }
+
+    await this.deps.messaging.sendText(chatId, "Gerando relatorio, aguarde...");
+
+    const entradas = await this.deps.store.findEntradasForReport({
+      empresaId: state.selectedEmpresaId,
+      tipo,
+      dateStart: dateRange.start,
+      dateEnd: dateRange.end
+    });
+
+    if (entradas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        `Nenhum registro encontrado para ${text}.\n\n${this.mainMenuText()}`
+      );
+      return;
+    }
+
+    const empresaNome = entradas[0].empresaNome ?? `Empresa ${state.selectedEmpresaId.toString()}`;
+    const pdfBuffer = await this.deps.pdfGenerator.generateReport({
+      categoria: tipo,
+      empresaNome,
+      reportDate: text,
+      generatedAt: new Date(),
+      entradas
+    });
+
+    const filename = `relatorio-${tipo.replace(/\s+/g, "-").toLowerCase()}-${text.replace(/\//g, "-")}.pdf`;
+    await this.deps.messaging.sendFile(chatId, {
+      mimetype: "application/pdf",
+      filename,
+      data: pdfBuffer.toString("base64")
+    });
+
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, this.mainMenuText());
   }
 
   private async resetToMenu(chatId: string, phoneE164: string): Promise<void> {
@@ -412,7 +583,7 @@ export class ConversationService {
   }
 
   private requireSelectedTipo(state: ConversationStateRecord): EntryTipo | null {
-    if (state.selectedTipo === "Diario de obra" || state.selectedTipo === "Manutencao") {
+    if (isEntryTipo(state.selectedTipo)) {
       return state.selectedTipo;
     }
 
@@ -420,11 +591,12 @@ export class ConversationService {
   }
 
   private mainMenuText(): string {
-    return "O que voce quer acessar?\n1) Diario de obra\n2) Manutencao\n\nDigite 0 para voltar ao menu.";
+    const options = ENTRY_TIPOS.map((tipo, index) => `${index + 1}) ${tipo}`).join("\n");
+    return `O que voce quer acessar?\n${options}\n\nDigite 0 para voltar ao menu.`;
   }
 
   private actionMenuText(tipo: EntryTipo): string {
-    return `${tipo}\n1) Inspecionar\n2) Adicionar\n\nDigite 0 para voltar ao menu.`;
+    return `${tipo}\n1) Consulta\n2) Incluir\n\nDigite 0 para voltar ao menu.`;
   }
 
   private empresaMenuText(empresas: EmpresaRecord[]): string {
@@ -437,8 +609,41 @@ export class ConversationService {
 
   private photoPromptText(tipo: EntryTipo, empresa: EmpresaRecord): string {
     const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
-    return `${tipo} - ${empresaNome}\nEnvie uma foto para adicionar ao registro.`;
+    return `${tipo} - ${empresaNome}\nEnvie uma foto para incluir no registro.`;
   }
+}
+
+function isEntryTipo(value: string | null | undefined): value is EntryTipo {
+  return typeof value === "string" && (ENTRY_TIPOS as readonly string[]).includes(value);
+}
+
+function parseReportDate(text: string): { start: Date; end: Date } | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+
+  if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2000 || year > 2100) {
+    return null;
+  }
+
+  // Sao Paulo is UTC-3 (BRT; Brazil abolished DST in 2019)
+  // Midnight Sao Paulo = 03:00 UTC
+  const startUtc = new Date(Date.UTC(year, month - 1, day, 3, 0, 0, 0));
+
+  if (
+    startUtc.getUTCFullYear() !== year ||
+    startUtc.getUTCMonth() !== month - 1 ||
+    startUtc.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const endUtc = new Date(Date.UTC(year, month - 1, day + 1, 3, 0, 0, 0));
+
+  return { start: startUtc, end: endUtc };
 }
 
 function buildStoragePath(input: {

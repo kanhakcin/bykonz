@@ -28,6 +28,27 @@ export class WahaClient implements MessagingClient, MediaDownloader {
     }
   }
 
+  async sendFile(
+    chatId: string,
+    file: { mimetype: string; filename: string; data: string },
+    caption?: string
+  ): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/sendFile`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        session: this.session,
+        chatId,
+        file,
+        caption: caption ?? ""
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`WAHA sendFile failed with ${response.status}: ${await response.text()}`);
+    }
+  }
+
   async download(url: string): Promise<Buffer> {
     const downloadUrl = this.resolveMediaUrl(url);
     const response = await fetch(downloadUrl, {

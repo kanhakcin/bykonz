@@ -49,10 +49,13 @@ npm start
 
 ## Flow
 
-- First message: replies with `Diario de obra` and `Manutencao`.
-- Then asks for `Inspecionar` or `Adicionar`.
-- `Adicionar`: asks for a photo, saves it to Supabase Storage through the
+- First message: replies with seven categories:
+  `Diario de obra`, `Abrir nao conformidade`, `Inspecao de servico`,
+  `Recebimento de material`, `Plano de manutencao`, `Programa sol`, and
+  `Treinamento`.
+- Then asks for `Consulta` or `Incluir`.
+- `Incluir`: asks for a photo, saves it to Supabase Storage through the
   S3-compatible API, creates
   `Entrada` and `_EntradaMedia`, then asks for the description.
-- `Inspecionar`: asks for a date and returns the v1 PDF placeholder.
+- `Consulta`: returns the v1 relatorio placeholder.
 - `0`, `menu`, and `cancelar` reset the conversation.

@@ -16,6 +16,7 @@ import type { WahaWebhook } from "../src/types/waha";
 
 const CHAT_ID = "5511999999999@c.us";
 const PHONE = "5511999999999";
+const PHONE_WITHOUT_NINTH = "551199999999";
 const CATEGORY_OPTIONS = [
   ["1", "Diario de obra"],
   ["2", "Abrir nao conformidade"],
@@ -209,6 +210,54 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)).toMatchObject({
       chatId: lidChatId,
       text: expect.stringContaining("7) Treinamento")
+    });
+  });
+
+  it("matches a database user stored with the ninth digit when WAHA omits it", async () => {
+    const { service, store, messaging } = createHarness();
+    const shortChatId = `${PHONE_WITHOUT_NINTH}@c.us`;
+
+    await service.handleWebhook(textWebhook("oi", shortChatId));
+
+    expect(store.states.get(shortChatId)).toMatchObject({
+      phoneE164: PHONE,
+      step: "MAIN_MENU"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+  });
+
+  it("matches a database user stored without the ninth digit when WAHA includes it", async () => {
+    const { service, store, messaging } = createHarness();
+    store.users.clear();
+    store.users.set(PHONE_WITHOUT_NINTH, {
+      id: 8,
+      phoneE164: PHONE_WITHOUT_NINTH,
+      nome: "Usuario Sem Nono Digito"
+    });
+
+    await service.handleWebhook(textWebhook("oi"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      phoneE164: PHONE_WITHOUT_NINTH,
+      step: "MAIN_MENU"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+  });
+
+  it("keeps the exact WAHA phone match when both Brazilian variants exist", async () => {
+    const { service, store } = createHarness();
+    const shortChatId = `${PHONE_WITHOUT_NINTH}@c.us`;
+    store.users.set(PHONE_WITHOUT_NINTH, {
+      id: 8,
+      phoneE164: PHONE_WITHOUT_NINTH,
+      nome: "Usuario Exato"
+    });
+
+    await service.handleWebhook(textWebhook("oi", shortChatId));
+
+    expect(store.states.get(shortChatId)).toMatchObject({
+      phoneE164: PHONE_WITHOUT_NINTH,
+      step: "MAIN_MENU"
     });
   });
 

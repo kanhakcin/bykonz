@@ -1,5 +1,5 @@
 import type { WahaMessagePayload, WahaWebhook } from "../types/waha";
-import { extractPhoneFromWahaPayload } from "../utils/phone";
+import { extractPhoneFromWahaPayload, getWahaPhoneLookupCandidates } from "../utils/phone";
 
 export type FlowStep =
   | "MAIN_MENU"
@@ -148,8 +148,8 @@ export class ConversationService {
       return;
     }
 
-    const phoneE164 = extractPhoneFromWahaPayload(payload);
-    const user = await this.deps.store.findUserByPhone(phoneE164);
+    const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
+    const user = await this.findUserByWahaPhone(wahaPhoneDigits);
     if (!user) {
       await this.deps.messaging.sendText(
         chatId,
@@ -158,6 +158,7 @@ export class ConversationService {
       return;
     }
 
+    const phoneE164 = user.phoneE164;
     const text = (payload.body ?? "").trim();
     if (this.isResetCommand(text)) {
       await this.resetToMenu(chatId, phoneE164);
@@ -204,6 +205,17 @@ export class ConversationService {
         await this.handleReportDate(chatId, phoneE164, state, text);
         return;
     }
+  }
+
+  private async findUserByWahaPhone(phoneDigits: string): Promise<UserRecord | null> {
+    for (const candidate of getWahaPhoneLookupCandidates(phoneDigits)) {
+      const user = await this.deps.store.findUserByPhone(candidate);
+      if (user) {
+        return user;
+      }
+    }
+
+    return null;
   }
 
   private isSupportedWebhook(webhook: WahaWebhook): webhook is WahaWebhook & { payload: WahaMessagePayload } {

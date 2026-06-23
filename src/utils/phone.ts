@@ -30,6 +30,20 @@ export function extractPhoneFromWahaPayload(payload: {
   return "";
 }
 
+export function getWahaPhoneLookupCandidates(phoneDigits: string): string[] {
+  const candidates = [phoneDigits];
+
+  if (/^\d+$/.test(phoneDigits) && phoneDigits.startsWith("55")) {
+    if (phoneDigits.length === 13 && phoneDigits[4] === "9") {
+      candidates.push(`${phoneDigits.slice(0, 4)}${phoneDigits.slice(5)}`);
+    } else if (phoneDigits.length === 12) {
+      candidates.push(`${phoneDigits.slice(0, 4)}9${phoneDigits.slice(4)}`);
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
 export function readNestedString(source: unknown, path: string[]): string | undefined {
   let current = source;
 

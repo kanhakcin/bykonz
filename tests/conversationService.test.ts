@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ConversationService,
   type ConversationStateRecord,
@@ -17,6 +17,8 @@ import type { WahaWebhook } from "../src/types/waha";
 const CHAT_ID = "5511999999999@c.us";
 const PHONE = "5511999999999";
 const PHONE_WITHOUT_NINTH = "551199999999";
+const REPORTED_PHONE_WITH_NINTH = "5547996222708";
+const REPORTED_PHONE_WITHOUT_NINTH = "554799720053";
 const CATEGORY_OPTIONS = [
   ["1", "Diario de obra"],
   ["2", "Abrir nao conformidade"],
@@ -261,12 +263,59 @@ describe("ConversationService", () => {
     });
   });
 
+  it("starts the flow for a reported stored number when WAHA includes a device suffix", async () => {
+    const { service, store, messaging } = createHarness();
+    const deviceChatId = `${REPORTED_PHONE_WITH_NINTH}:12@c.us`;
+    store.users.clear();
+    store.users.set(REPORTED_PHONE_WITH_NINTH, {
+      id: 9,
+      phoneE164: REPORTED_PHONE_WITH_NINTH,
+      nome: "Usuario Com Sufixo"
+    });
+
+    await service.handleWebhook(textWebhook("oi", deviceChatId));
+
+    expect(store.states.get(deviceChatId)).toMatchObject({
+      phoneE164: REPORTED_PHONE_WITH_NINTH,
+      step: "MAIN_MENU"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+  });
+
+  it("starts the flow for a reported shorter stored number when WAHA includes a device suffix", async () => {
+    const { service, store, messaging } = createHarness();
+    const deviceChatId = `${REPORTED_PHONE_WITHOUT_NINTH}:3@s.whatsapp.net`;
+    store.users.clear();
+    store.users.set(REPORTED_PHONE_WITHOUT_NINTH, {
+      id: 10,
+      phoneE164: REPORTED_PHONE_WITHOUT_NINTH,
+      nome: "Usuario Sem Nono Digito Com Sufixo"
+    });
+
+    await service.handleWebhook(textWebhook("oi", deviceChatId));
+
+    expect(store.states.get(deviceChatId)).toMatchObject({
+      phoneE164: REPORTED_PHONE_WITHOUT_NINTH,
+      step: "MAIN_MENU"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+  });
+
   it("rejects unknown users", async () => {
     const { service, messaging } = createHarness();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    await service.handleWebhook(textWebhook("oi", "5511888888888@c.us"));
-
-    expect(messaging.messages.at(-1)?.text).toContain("Numero nao cadastrado");
+    try {
+      await service.handleWebhook(textWebhook("oi", "5511888888888@c.us"));
+      expect(messaging.messages.at(-1)?.text).toContain("Numero nao cadastrado");
+      expect(warnSpy).toHaveBeenCalledWith("WAHA phone lookup did not match a registered user", {
+        chatId: "5511888888888@c.us",
+        wahaPhoneDigits: "5511888888888",
+        phoneLookupCandidates: ["5511888888888"]
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it.each(CATEGORY_OPTIONS)("selects %s as %s and shows the action menu", async (option, tipo) => {

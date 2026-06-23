@@ -149,8 +149,14 @@ export class ConversationService {
     }
 
     const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
-    const user = await this.findUserByWahaPhone(wahaPhoneDigits);
+    const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);
+    const user = await this.findUserByWahaPhone(phoneLookupCandidates);
     if (!user) {
+      console.warn("WAHA phone lookup did not match a registered user", {
+        chatId,
+        wahaPhoneDigits,
+        phoneLookupCandidates
+      });
       await this.deps.messaging.sendText(
         chatId,
         "Numero nao cadastrado. Fale com o administrador para liberar o acesso."
@@ -207,8 +213,8 @@ export class ConversationService {
     }
   }
 
-  private async findUserByWahaPhone(phoneDigits: string): Promise<UserRecord | null> {
-    for (const candidate of getWahaPhoneLookupCandidates(phoneDigits)) {
+  private async findUserByWahaPhone(phoneLookupCandidates: string[]): Promise<UserRecord | null> {
+    for (const candidate of phoneLookupCandidates) {
       const user = await this.deps.store.findUserByPhone(candidate);
       if (user) {
         return user;

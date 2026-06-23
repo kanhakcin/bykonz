@@ -1,5 +1,5 @@
 export function normalizePhoneFromChatId(chatId: string): string {
-  return chatId.split("@")[0]?.replace(/\D/g, "") ?? "";
+  return chatId.split("@")[0]?.split(":")[0]?.replace(/\D/g, "") ?? "";
 }
 
 export function extractPhoneFromWahaPayload(payload: {

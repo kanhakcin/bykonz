@@ -11,7 +11,7 @@ function makeStorage(overrides: Partial<ObjectStorage> = {}): ObjectStorage {
 }
 
 const BASE_INPUT: ReportInput = {
-  categoria: "Diario de obra",
+  categoria: "Inspecao de servico",
   empresaNome: "Obra Centro",
   reportDate: "22/06/2026",
   generatedAt: new Date("2026-06-22T15:00:00Z"),
@@ -29,7 +29,7 @@ describe("PdfReportGenerator", () => {
           id: 1n,
           description: "Parede concretada",
           createdAt: new Date("2026-06-22T10:00:00Z"),
-          tipo: "Diario de obra",
+          tipo: "Inspecao de servico",
           tipoServico: "Concretagem",
           numeroProcedimento: "PROC-45/2026",
           empresaNome: "Obra Centro",
@@ -40,6 +40,34 @@ describe("PdfReportGenerator", () => {
     });
 
     expect(result).toBeInstanceOf(Buffer);
+    expect(result.slice(0, 4).toString()).toBe("%PDF");
+  });
+
+  it("generates a PDF when training metadata is present", async () => {
+    const generator = new PdfReportGenerator(makeStorage());
+
+    const result = await generator.generateReport({
+      ...BASE_INPUT,
+      categoria: "Treinamento",
+      entradas: [
+        {
+          id: 1n,
+          description: "",
+          createdAt: new Date("2026-06-22T10:00:00Z"),
+          tipo: "Treinamento",
+          tipoServico: null,
+          numeroProcedimento: null,
+          treinamentoTema: "NR-35 Trabalho em altura",
+          treinamentoParticipantes: "Ana Silva - 123.456.789-00",
+          treinamentoInicio: new Date("2026-06-22T11:00:00Z"),
+          treinamentoFim: new Date("2026-06-22T13:00:00Z"),
+          empresaNome: "Obra Centro",
+          usuarioNome: "Joao",
+          mediaUrls: []
+        }
+      ]
+    });
+
     expect(result.slice(0, 4).toString()).toBe("%PDF");
   });
 

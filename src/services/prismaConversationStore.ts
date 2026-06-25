@@ -3,6 +3,7 @@ import type {
   ConversationStateRecord,
   ConversationStore,
   CreateEntradaInput,
+  CreateTreinamentoInput,
   EmpresaRecord,
   EntradaForReport,
   SaveConversationStateInput,
@@ -66,6 +67,11 @@ export class PrismaConversationStore implements ConversationStore {
         selectedEmpresaId: input.selectedEmpresaId ?? null,
         selectedTipoServico: input.selectedTipoServico ?? null,
         selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
+        selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
+        selectedTreinamentoParticipantes: input.selectedTreinamentoParticipantes ?? null,
+        selectedTreinamentoInicio: input.selectedTreinamentoInicio ?? null,
+        selectedTreinamentoFim: input.selectedTreinamentoFim ?? null,
+        selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
         pendingEntradaId: input.pendingEntradaId ?? null
       },
       update: {
@@ -75,6 +81,11 @@ export class PrismaConversationStore implements ConversationStore {
         selectedEmpresaId: input.selectedEmpresaId ?? null,
         selectedTipoServico: input.selectedTipoServico ?? null,
         selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
+        selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
+        selectedTreinamentoParticipantes: input.selectedTreinamentoParticipantes ?? null,
+        selectedTreinamentoInicio: input.selectedTreinamentoInicio ?? null,
+        selectedTreinamentoFim: input.selectedTreinamentoFim ?? null,
+        selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
         pendingEntradaId: input.pendingEntradaId ?? null
       }
     });
@@ -94,8 +105,8 @@ export class PrismaConversationStore implements ConversationStore {
         userId: input.userId,
         empresaId: input.empresaId,
         tipo: input.tipo,
-        tipoServico: input.tipoServico,
-        numeroProcedimento: input.numeroProcedimento,
+        tipoServico: input.tipoServico ?? null,
+        numeroProcedimento: input.numeroProcedimento ?? null,
         description: input.description
       },
       select: { id: true }
@@ -104,11 +115,41 @@ export class PrismaConversationStore implements ConversationStore {
     return entrada;
   }
 
-  async addEntradaMedia(input: { entradaId: bigint; mediaUrl: string }): Promise<void> {
+  async createTreinamento(input: CreateTreinamentoInput): Promise<{ entradaId: bigint; treinamentoId: number }> {
+    return this.prisma.$transaction(async (tx) => {
+      const entrada = await tx.entrada.create({
+        data: {
+          userId: input.userId,
+          empresaId: input.empresaId,
+          tipo: "Treinamento",
+          tipoServico: null,
+          numeroProcedimento: null,
+          description: ""
+        },
+        select: { id: true }
+      });
+
+      const treinamento = await tx.treinamento.create({
+        data: {
+          entradaId: entrada.id,
+          tema: input.tema,
+          participantes: input.participantes,
+          inicio: input.inicio,
+          fim: input.fim
+        },
+        select: { id: true }
+      });
+
+      return { entradaId: entrada.id, treinamentoId: treinamento.id };
+    });
+  }
+
+  async addEntradaMedia(input: { entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }): Promise<void> {
     await this.prisma.entradaMedia.create({
       data: {
         entradaId: input.entradaId,
-        mediaUrl: input.mediaUrl
+        mediaUrl: input.mediaUrl,
+        mediaTipo: input.mediaTipo ?? null
       }
     });
   }
@@ -138,7 +179,8 @@ export class PrismaConversationStore implements ConversationStore {
       include: {
         empresa: { select: { nome: true } },
         usuario: { select: { nome: true } },
-        media: { select: { mediaUrl: true } }
+        media: { select: { mediaUrl: true } },
+        treinamento: true
       },
       orderBy: { createdAt: "asc" }
     });
@@ -150,6 +192,10 @@ export class PrismaConversationStore implements ConversationStore {
       tipo: e.tipo,
       tipoServico: e.tipoServico,
       numeroProcedimento: e.numeroProcedimento,
+      treinamentoTema: e.treinamento?.tema ?? null,
+      treinamentoParticipantes: e.treinamento?.participantes ?? null,
+      treinamentoInicio: e.treinamento?.inicio ?? null,
+      treinamentoFim: e.treinamento?.fim ?? null,
       empresaNome: e.empresa?.nome ?? null,
       usuarioNome: e.usuario.nome ?? null,
       mediaUrls: e.media.map((m) => m.mediaUrl)
@@ -165,6 +211,11 @@ function mapState(state: {
   selectedEmpresaId: bigint | null;
   selectedTipoServico: string | null;
   selectedNumeroProcedimento: string | null;
+  selectedTreinamentoTema?: string | null;
+  selectedTreinamentoParticipantes?: string | null;
+  selectedTreinamentoInicio?: Date | null;
+  selectedTreinamentoFim?: Date | null;
+  selectedTrainingPhotoCount?: number | null;
   pendingEntradaId: bigint | null;
 }): ConversationStateRecord {
   return {
@@ -175,6 +226,11 @@ function mapState(state: {
     selectedEmpresaId: state.selectedEmpresaId,
     selectedTipoServico: state.selectedTipoServico,
     selectedNumeroProcedimento: state.selectedNumeroProcedimento,
+    selectedTreinamentoTema: state.selectedTreinamentoTema ?? null,
+    selectedTreinamentoParticipantes: state.selectedTreinamentoParticipantes ?? null,
+    selectedTreinamentoInicio: state.selectedTreinamentoInicio ?? null,
+    selectedTreinamentoFim: state.selectedTreinamentoFim ?? null,
+    selectedTrainingPhotoCount: state.selectedTrainingPhotoCount ?? null,
     pendingEntradaId: state.pendingEntradaId
   };
 }

@@ -39,6 +39,20 @@ export class PdfReportGenerator implements PdfGenerator {
 
       doc.fontSize(10).font("Helvetica-Bold").text(`${time} - ${author}`);
 
+      if (entrada.treinamentoTema) {
+        doc.font("Helvetica").text(`Tema do treinamento: ${entrada.treinamentoTema}`);
+      }
+
+      if (entrada.treinamentoParticipantes) {
+        doc.font("Helvetica").text(`Participantes: ${entrada.treinamentoParticipantes}`);
+      }
+
+      if (entrada.treinamentoInicio && entrada.treinamentoFim) {
+        doc
+          .font("Helvetica")
+          .text(`Inicio/Fim: ${formatDateTime(entrada.treinamentoInicio)} - ${formatDateTime(entrada.treinamentoFim)}`);
+      }
+
       if (entrada.tipoServico) {
         doc.font("Helvetica").text(`Tipo de serviço: ${entrada.tipoServico}`);
       }
@@ -57,7 +71,7 @@ export class PdfReportGenerator implements PdfGenerator {
         const isSupported = ext === "jpg" || ext === "jpeg" || ext === "png";
 
         if (!isSupported) {
-          doc.fontSize(9).font("Helvetica-Oblique").text("[Imagem em formato nao suportado]");
+          doc.fontSize(9).font("Helvetica-Oblique").text("[Arquivo em formato nao exibido no PDF]");
           doc.moveDown(0.3);
           continue;
         }

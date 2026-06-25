@@ -15,7 +15,13 @@ export type FlowStep =
   | "AWAITING_DESCRIPTION"
   | "AWAITING_INSPECT_DATE"
   | "SELECT_EMPRESA_FOR_REPORT"
-  | "AWAITING_REPORT_DATE";
+  | "AWAITING_REPORT_DATE"
+  | "SELECT_EMPRESA_FOR_TRAINING"
+  | "AWAITING_TRAINING_TEMA"
+  | "AWAITING_TRAINING_PARTICIPANTS"
+  | "AWAITING_TRAINING_DATES"
+  | "AWAITING_TRAINING_PHOTO"
+  | "AWAITING_TRAINING_FILE";
 
 const ENTRY_TIPOS = [
   "Inspecao de servico",
@@ -40,6 +46,13 @@ const TIPO_SERVICOS = [
 
 export type TipoServico = (typeof TIPO_SERVICOS)[number];
 
+const TRAINING_MEDIA_TYPES = {
+  photo: "treinamento_foto",
+  file: "treinamento_arquivo"
+} as const;
+
+type TrainingMediaType = (typeof TRAINING_MEDIA_TYPES)[keyof typeof TRAINING_MEDIA_TYPES];
+
 export interface UserRecord {
   id: number;
   phoneE164: string;
@@ -59,6 +72,11 @@ export interface ConversationStateRecord {
   selectedEmpresaId?: bigint | null;
   selectedTipoServico?: string | null;
   selectedNumeroProcedimento?: string | null;
+  selectedTreinamentoTema?: string | null;
+  selectedTreinamentoParticipantes?: string | null;
+  selectedTreinamentoInicio?: Date | null;
+  selectedTreinamentoFim?: Date | null;
+  selectedTrainingPhotoCount?: number | null;
   pendingEntradaId?: bigint | null;
 }
 
@@ -68,9 +86,18 @@ export interface CreateEntradaInput {
   userId: number;
   empresaId: bigint;
   tipo: EntryTipo;
-  tipoServico: TipoServico;
-  numeroProcedimento: string;
+  tipoServico?: TipoServico | null;
+  numeroProcedimento?: string | null;
   description: string;
+}
+
+export interface CreateTreinamentoInput {
+  userId: number;
+  empresaId: bigint;
+  tema: string;
+  participantes: string;
+  inicio: Date;
+  fim: Date;
 }
 
 export interface EntradaForReport {
@@ -80,6 +107,10 @@ export interface EntradaForReport {
   tipo: string | null;
   tipoServico: string | null;
   numeroProcedimento: string | null;
+  treinamentoTema?: string | null;
+  treinamentoParticipantes?: string | null;
+  treinamentoInicio?: Date | null;
+  treinamentoFim?: Date | null;
   empresaNome: string | null;
   usuarioNome: string | null;
   mediaUrls: string[];
@@ -100,7 +131,8 @@ export interface ConversationStore {
   saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord>;
   clearState(chatId: string): Promise<void>;
   createEntrada(input: CreateEntradaInput): Promise<{ id: bigint }>;
-  addEntradaMedia(input: { entradaId: bigint; mediaUrl: string }): Promise<void>;
+  createTreinamento(input: CreateTreinamentoInput): Promise<{ entradaId: bigint; treinamentoId: number }>;
+  addEntradaMedia(input: { entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }): Promise<void>;
   updateEntradaDescription(entradaId: bigint, description: string): Promise<void>;
   findEntradasForReport(input: {
     empresaId: bigint;
@@ -165,6 +197,7 @@ const TIPO_SERVICO_OPTIONS: Record<string, TipoServico> = {
 };
 
 const RESET_COMMANDS = new Set(["0", "menu", "cancelar"]);
+const TRAINING_PHOTO_DONE_COMMANDS = new Set(["ok", "pronto", "concluir", "fim"]);
 
 export class ConversationService {
   constructor(private readonly deps: ConversationServiceDeps) {}
@@ -251,6 +284,11 @@ export class ConversationService {
         selectedEmpresaId: null,
         selectedTipoServico: null,
         selectedNumeroProcedimento: null,
+        selectedTreinamentoTema: null,
+        selectedTreinamentoParticipantes: null,
+        selectedTreinamentoInicio: null,
+        selectedTreinamentoFim: null,
+        selectedTrainingPhotoCount: null,
         pendingEntradaId: null
       });
       this.logWahaDebug("WAHA conversation state created", {
@@ -265,7 +303,7 @@ export class ConversationService {
 
     switch (state.step) {
       case "MAIN_MENU":
-        await this.handleMainMenu(chatId, phoneE164, text);
+        await this.handleMainMenu(chatId, phoneE164, user.id, text);
         return;
       case "ACTION_MENU":
         await this.handleActionMenu(chatId, phoneE164, user.id, state, text);
@@ -293,6 +331,24 @@ export class ConversationService {
         return;
       case "AWAITING_REPORT_DATE":
         await this.handleReportDate(chatId, phoneE164, state, text);
+        return;
+      case "SELECT_EMPRESA_FOR_TRAINING":
+        await this.handleEmpresaSelectionForTraining(chatId, phoneE164, user.id, state, text);
+        return;
+      case "AWAITING_TRAINING_TEMA":
+        await this.handleTrainingTema(chatId, phoneE164, state, text);
+        return;
+      case "AWAITING_TRAINING_PARTICIPANTS":
+        await this.handleTrainingParticipants(chatId, phoneE164, state, text);
+        return;
+      case "AWAITING_TRAINING_DATES":
+        await this.handleTrainingDates(chatId, phoneE164, user.id, state, text);
+        return;
+      case "AWAITING_TRAINING_PHOTO":
+        await this.handleTrainingPhoto(chatId, phoneE164, user.id, state, payload);
+        return;
+      case "AWAITING_TRAINING_FILE":
+        await this.handleTrainingFile(chatId, phoneE164, user.id, state, payload);
         return;
     }
   }
@@ -342,10 +398,15 @@ export class ConversationService {
     return true;
   }
 
-  private async handleMainMenu(chatId: string, phoneE164: string, text: string): Promise<void> {
+  private async handleMainMenu(chatId: string, phoneE164: string, userId: number, text: string): Promise<void> {
     const tipo = TIPO_OPTIONS[text];
     if (!tipo) {
       await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.mainMenuText()}`);
+      return;
+    }
+
+    if (tipo === "Treinamento") {
+      await this.resolveEmpresaForTraining(chatId, phoneE164, userId);
       return;
     }
 
@@ -465,6 +526,327 @@ export class ConversationService {
       pendingEntradaId: null
     });
     await this.deps.messaging.sendText(chatId, this.tipoServicoMenuText(tipo));
+  }
+
+  private async resolveEmpresaForTraining(chatId: string, phoneE164: string, userId: number): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    if (empresas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (empresas.length === 1) {
+      await this.deps.store.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_TRAINING_TEMA",
+        selectedTipo: "Treinamento",
+        selectedEmpresaId: empresas[0].id,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
+        selectedTreinamentoTema: null,
+        selectedTreinamentoParticipantes: null,
+        selectedTreinamentoInicio: null,
+        selectedTreinamentoFim: null,
+        selectedTrainingPhotoCount: null,
+        pendingEntradaId: null
+      });
+      await this.deps.messaging.sendText(chatId, this.trainingTemaPromptText());
+      return;
+    }
+
+    await this.deps.store.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA_FOR_TRAINING",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+  }
+
+  private async handleEmpresaSelectionForTraining(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    const selectedIndex = Number(text) - 1;
+    const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
+    if (!empresa) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      return;
+    }
+
+    await this.deps.store.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_TEMA",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: empresa.id,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.trainingTemaPromptText());
+  }
+
+  private async handleTrainingTema(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const tema = text.trim();
+    if (!tema) {
+      await this.deps.messaging.sendText(chatId, this.trainingTemaPromptText());
+      return;
+    }
+
+    await this.deps.store.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_PARTICIPANTS",
+      selectedTreinamentoTema: tema
+    });
+    await this.deps.messaging.sendText(chatId, this.trainingParticipantsPromptText());
+  }
+
+  private async handleTrainingParticipants(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId || !state.selectedTreinamentoTema) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const participantes = text.trim();
+    if (!participantes) {
+      await this.deps.messaging.sendText(chatId, this.trainingParticipantsPromptText());
+      return;
+    }
+
+    await this.deps.store.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_DATES",
+      selectedTreinamentoParticipantes: participantes
+    });
+    await this.deps.messaging.sendText(chatId, this.trainingDatesPromptText());
+  }
+
+  private async handleTrainingDates(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (
+      state.selectedTipo !== "Treinamento" ||
+      !state.selectedEmpresaId ||
+      !state.selectedTreinamentoTema ||
+      !state.selectedTreinamentoParticipantes
+    ) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const dateRange = parseTrainingDateRange(text);
+    if (!dateRange) {
+      await this.deps.messaging.sendText(chatId, `Data/hora invalida.\n\n${this.trainingDatesPromptText()}`);
+      return;
+    }
+
+    const treinamento = await this.deps.store.createTreinamento({
+      userId,
+      empresaId: state.selectedEmpresaId,
+      tema: state.selectedTreinamentoTema,
+      participantes: state.selectedTreinamentoParticipantes,
+      inicio: dateRange.inicio,
+      fim: dateRange.fim
+    });
+
+    await this.deps.store.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_PHOTO",
+      selectedTreinamentoInicio: dateRange.inicio,
+      selectedTreinamentoFim: dateRange.fim,
+      selectedTrainingPhotoCount: 0,
+      pendingEntradaId: treinamento.entradaId
+    });
+    await this.deps.messaging.sendText(chatId, this.trainingPhotoPromptText());
+  }
+
+  private async handleTrainingPhoto(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    if (!state.selectedEmpresaId || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const text = (payload.body ?? "").trim().toLowerCase();
+    const photoCount = state.selectedTrainingPhotoCount ?? 0;
+    if (TRAINING_PHOTO_DONE_COMMANDS.has(text)) {
+      if (photoCount === 0) {
+        await this.deps.messaging.sendText(chatId, "Envie pelo menos uma foto do treinamento para continuar.");
+        return;
+      }
+
+      await this.deps.store.saveState({
+        ...state,
+        chatId,
+        phoneE164,
+        step: "AWAITING_TRAINING_FILE"
+      });
+      await this.deps.messaging.sendText(chatId, this.trainingFilePromptText());
+      return;
+    }
+
+    const uploaded = await this.handleTrainingMediaUpload({
+      chatId,
+      userId,
+      state,
+      payload,
+      mediaTipo: TRAINING_MEDIA_TYPES.photo,
+      allowedKinds: "image",
+      missingMessage: "Envie uma foto do treinamento para continuar.",
+      invalidMessage: "O arquivo precisa ser uma imagem. Envie uma foto do treinamento."
+    });
+    if (!uploaded) {
+      return;
+    }
+
+    await this.deps.store.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      selectedTrainingPhotoCount: photoCount + 1
+    });
+    await this.deps.messaging.sendText(chatId, "Foto recebida. Envie outra foto ou digite OK para continuar.");
+  }
+
+  private async handleTrainingFile(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    if (!state.selectedEmpresaId || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const uploaded = await this.handleTrainingMediaUpload({
+      chatId,
+      userId,
+      state,
+      payload,
+      mediaTipo: TRAINING_MEDIA_TYPES.file,
+      allowedKinds: "image-or-pdf",
+      missingMessage: "Envie o arquivo do treinamento em PDF ou foto.",
+      invalidMessage: "O arquivo precisa ser PDF ou imagem. Envie novamente."
+    });
+    if (!uploaded) {
+      return;
+    }
+
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, "Treinamento salvo com sucesso.");
+  }
+
+  private async handleTrainingMediaUpload(input: {
+    chatId: string;
+    userId: number;
+    state: ConversationStateRecord;
+    payload: WahaMessagePayload;
+    mediaTipo: TrainingMediaType;
+    allowedKinds: "image" | "image-or-pdf";
+    missingMessage: string;
+    invalidMessage: string;
+  }): Promise<boolean> {
+    const media = input.payload.media;
+    if (!input.payload.hasMedia || !media?.url) {
+      await this.deps.messaging.sendText(input.chatId, input.missingMessage);
+      return false;
+    }
+
+    const contentType = media.mimetype ?? "application/octet-stream";
+    const isImage = contentType.startsWith("image/");
+    const isPdf = contentType === "application/pdf";
+    if (!isImage && (input.allowedKinds !== "image-or-pdf" || !isPdf)) {
+      await this.deps.messaging.sendText(input.chatId, input.invalidMessage);
+      return false;
+    }
+
+    try {
+      const body = await this.deps.mediaDownloader.download(media.url);
+      const objectPath = buildStoragePath({
+        empresaId: input.state.selectedEmpresaId!,
+        userId: input.userId,
+        messageId: input.payload.id,
+        filename: media.filename,
+        contentType
+      });
+
+      await this.deps.objectStorage.uploadPrivateObject({
+        path: objectPath,
+        body,
+        contentType
+      });
+
+      await this.deps.store.addEntradaMedia({
+        entradaId: input.state.pendingEntradaId!,
+        mediaUrl: objectPath,
+        mediaTipo: input.mediaTipo
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Failed to process WhatsApp training media", error);
+      await this.deps.messaging.sendText(
+        input.chatId,
+        "Nao consegui processar o arquivo. Tente enviar novamente em alguns instantes."
+      );
+      return false;
+    }
   }
 
   private async handleServiceType(
@@ -779,6 +1161,11 @@ export class ConversationService {
       selectedEmpresaId: null,
       selectedTipoServico: null,
       selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
       pendingEntradaId: null
     });
     await this.deps.messaging.sendText(chatId, this.mainMenuText());
@@ -844,6 +1231,26 @@ export class ConversationService {
     const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
     return `${tipo} - ${empresaNome}\nTipo de serviço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\nEnvie uma foto para incluir no registro.`;
   }
+
+  private trainingTemaPromptText(): string {
+    return "Informe o tema do treinamento.";
+  }
+
+  private trainingParticipantsPromptText(): string {
+    return "Informe os nomes e CPFs dos participantes.";
+  }
+
+  private trainingDatesPromptText(): string {
+    return "Informe data e hora de inicio e fim no formato DD/MM/AAAA HH:mm - DD/MM/AAAA HH:mm.";
+  }
+
+  private trainingPhotoPromptText(): string {
+    return "Envie as fotos do treinamento. Quando terminar, digite OK.";
+  }
+
+  private trainingFilePromptText(): string {
+    return "Envie o arquivo do treinamento em PDF ou foto.";
+  }
 }
 
 function isWahaDebugLoggingEnabled(): boolean {
@@ -888,6 +1295,58 @@ function parseReportDate(text: string): { start: Date; end: Date } | null {
   return { start: startUtc, end: endUtc };
 }
 
+function parseTrainingDateRange(text: string): { inicio: Date; fim: Date } | null {
+  const matches = [...text.matchAll(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/g)];
+  if (matches.length !== 2) {
+    return null;
+  }
+
+  const inicio = parseSaoPauloDateTime(matches[0]);
+  const fim = parseSaoPauloDateTime(matches[1]);
+  if (!inicio || !fim || fim.getTime() <= inicio.getTime()) {
+    return null;
+  }
+
+  return { inicio, fim };
+}
+
+function parseSaoPauloDateTime(match: RegExpMatchArray): Date | null {
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  const hour = parseInt(match[4], 10);
+  const minute = parseInt(match[5], 10);
+
+  if (
+    day < 1 ||
+    day > 31 ||
+    month < 1 ||
+    month > 12 ||
+    year < 2000 ||
+    year > 2100 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  const localCalendar = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  if (
+    localCalendar.getUTCFullYear() !== year ||
+    localCalendar.getUTCMonth() !== month - 1 ||
+    localCalendar.getUTCDate() !== day ||
+    localCalendar.getUTCHours() !== hour ||
+    localCalendar.getUTCMinutes() !== minute
+  ) {
+    return null;
+  }
+
+  // Sao Paulo is UTC-3 (BRT; Brazil abolished DST in 2019).
+  return new Date(Date.UTC(year, month - 1, day, hour + 3, minute, 0, 0));
+}
+
 function buildStoragePath(input: {
   empresaId: bigint;
   userId: number;
@@ -916,6 +1375,8 @@ function extensionFrom(filename: string | null | undefined, contentType: string)
       return "png";
     case "image/webp":
       return "webp";
+    case "application/pdf":
+      return "pdf";
     default:
       return "bin";
   }

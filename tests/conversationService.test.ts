@@ -4,6 +4,7 @@ import {
   type ConversationStateRecord,
   type ConversationStore,
   type CreateEntradaInput,
+  type CreateTreinamentoInput,
   type EmpresaRecord,
   type EntradaForReport,
   type MessagingClient,
@@ -19,13 +20,12 @@ const PHONE = "5511999999999";
 const PHONE_WITHOUT_NINTH = "551199999999";
 const REPORTED_PHONE_WITH_NINTH = "5547996222708";
 const REPORTED_PHONE_WITHOUT_NINTH = "554799720053";
-const CATEGORY_OPTIONS = [
+const ACTION_MENU_CATEGORY_OPTIONS = [
   ["1", "Inspecao de servico"],
   ["2", "Abrir nao conformidade"],
   ["3", "Recebimento de material"],
   ["4", "Plano de manutencao"],
-  ["5", "Programa sol"],
-  ["6", "Treinamento"]
+  ["5", "Programa sol"]
 ] as const;
 
 class FakeStore implements ConversationStore {
@@ -33,7 +33,8 @@ class FakeStore implements ConversationStore {
   empresasByUser = new Map<number, EmpresaRecord[]>();
   states = new Map<string, ConversationStateRecord>();
   entradas: Array<CreateEntradaInput & { id: bigint }> = [];
-  media: Array<{ entradaId: bigint; mediaUrl: string }> = [];
+  treinamentos: Array<CreateTreinamentoInput & { id: number; entradaId: bigint }> = [];
+  media: Array<{ entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }> = [];
   reportEntradas: EntradaForReport[] = [];
 
   async findUserByPhone(phoneDigits: string): Promise<UserRecord | null> {
@@ -63,7 +64,28 @@ class FakeStore implements ConversationStore {
     return { id: entrada.id };
   }
 
-  async addEntradaMedia(input: { entradaId: bigint; mediaUrl: string }): Promise<void> {
+  async createTreinamento(input: CreateTreinamentoInput): Promise<{ entradaId: bigint; treinamentoId: number }> {
+    const entrada = {
+      userId: input.userId,
+      empresaId: input.empresaId,
+      tipo: "Treinamento" as const,
+      tipoServico: null,
+      numeroProcedimento: null,
+      description: "",
+      id: BigInt(this.entradas.length + 1)
+    };
+    const treinamento = {
+      ...input,
+      id: this.treinamentos.length + 1,
+      entradaId: entrada.id
+    };
+
+    this.entradas.push(entrada);
+    this.treinamentos.push(treinamento);
+    return { entradaId: entrada.id, treinamentoId: treinamento.id };
+  }
+
+  async addEntradaMedia(input: { entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }): Promise<void> {
     this.media.push(input);
   }
 
@@ -168,6 +190,24 @@ function photoWebhook(): WahaWebhook {
         url: "http://waha.local/api/files/photo-1.jpg",
         mimetype: "image/jpeg",
         filename: "foto.jpg"
+      }
+    }
+  };
+}
+
+function fileWebhook(): WahaWebhook {
+  return {
+    event: "message",
+    session: "default",
+    payload: {
+      id: "file-1",
+      from: CHAT_ID,
+      body: "",
+      hasMedia: true,
+      media: {
+        url: "http://waha.local/api/files/treinamento.pdf",
+        mimetype: "application/pdf",
+        filename: "treinamento.pdf"
       }
     }
   };
@@ -377,7 +417,7 @@ describe("ConversationService", () => {
     }
   });
 
-  it.each(CATEGORY_OPTIONS)("selects %s as %s and shows the action menu", async (option, tipo) => {
+  it.each(ACTION_MENU_CATEGORY_OPTIONS)("selects %s as %s and shows the action menu", async (option, tipo) => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
@@ -390,6 +430,129 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain(tipo);
     expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
     expect(messaging.messages.at(-1)?.text).toContain("2) Incluir");
+  });
+
+  it("runs the Treinamento flow with tema, participants, dates, photos, and file upload", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("6"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_TEMA",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: 10n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
+
+    await service.handleWebhook(textWebhook("NR-35 Trabalho em altura"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_PARTICIPANTS",
+      selectedTreinamentoTema: "NR-35 Trabalho em altura"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("nomes e CPFs");
+
+    await service.handleWebhook(textWebhook("Ana Silva - 123.456.789-00\nBruno Souza - 987.654.321-00"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_DATES",
+      selectedTreinamentoParticipantes: "Ana Silva - 123.456.789-00\nBruno Souza - 987.654.321-00"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA HH:mm");
+
+    await service.handleWebhook(textWebhook("25/06/2026 08:00 - 25/06/2026 10:30"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_PHOTO",
+      pendingEntradaId: 1n,
+      selectedTrainingPhotoCount: 0
+    });
+    expect(store.treinamentos).toMatchObject([
+      {
+        entradaId: 1n,
+        tema: "NR-35 Trabalho em altura",
+        participantes: "Ana Silva - 123.456.789-00\nBruno Souza - 987.654.321-00",
+        inicio: new Date("2026-06-25T11:00:00.000Z"),
+        fim: new Date("2026-06-25T13:30:00.000Z")
+      }
+    ]);
+    expect(messaging.messages.at(-1)?.text).toContain("fotos do treinamento");
+
+    await service.handleWebhook(photoWebhook());
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_PHOTO",
+      selectedTrainingPhotoCount: 1
+    });
+    expect(storage.uploads).toHaveLength(1);
+    expect(store.media[0]).toMatchObject({
+      entradaId: 1n,
+      mediaUrl: storage.uploads[0].path,
+      mediaTipo: "treinamento_foto"
+    });
+
+    await service.handleWebhook(textWebhook("OK"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_TRAINING_FILE");
+    expect(messaging.messages.at(-1)?.text).toContain("PDF ou foto");
+
+    await service.handleWebhook(fileWebhook());
+
+    expect(storage.uploads).toHaveLength(2);
+    expect(storage.uploads[1]).toMatchObject({
+      contentType: "application/pdf"
+    });
+    expect(storage.uploads[1].path).toMatch(/\.pdf$/);
+    expect(store.media[1]).toMatchObject({
+      entradaId: 1n,
+      mediaUrl: storage.uploads[1].path,
+      mediaTipo: "treinamento_arquivo"
+    });
+    expect(store.entradas[0]).toMatchObject({
+      userId: 7,
+      empresaId: 10n,
+      tipo: "Treinamento",
+      description: ""
+    });
+    expect(store.states.has(CHAT_ID)).toBe(false);
+    expect(messaging.messages.at(-1)?.text).toContain("Treinamento salvo");
+  });
+
+  it("asks users with multiple companies to choose one before the Treinamento details", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [
+      { id: 10n, nome: "Obra Centro" },
+      { id: 20n, nome: "Obra Sul" }
+    ]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("6"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "SELECT_EMPRESA_FOR_TRAINING",
+      selectedTipo: "Treinamento"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("2) Obra Sul");
+
+    await service.handleWebhook(textWebhook("2"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_TEMA",
+      selectedEmpresaId: 20n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
+  });
+
+  it("re-prompts when Treinamento dates are invalid", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("6"));
+    await service.handleWebhook(textWebhook("NR-35 Trabalho em altura"));
+    await service.handleWebhook(textWebhook("Ana Silva - 123.456.789-00"));
+    await service.handleWebhook(textWebhook("25/06/2026 10:30 - 25/06/2026 08:00"));
+
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_TRAINING_DATES");
+    expect(store.treinamentos).toHaveLength(0);
+    expect(messaging.messages.at(-1)?.text).toContain("Data/hora invalida");
   });
 
   it("re-shows the main menu after an invalid category", async () => {

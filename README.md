@@ -73,10 +73,14 @@ Prisma types generated from the checked-in schema.
 - First message: replies with six categories:
   `Inspecao de servico`, `Abrir nao conformidade`, `Recebimento de material`,
   `Plano de manutencao`, `Programa sol`, and `Treinamento`.
-- Then asks for `Consulta` or `Incluir`.
+- For the first five categories, then asks for `Consulta` or `Incluir`.
 - `Incluir`: asks for company when needed, service type, procedure number, and
   photo. The photo is saved to Supabase Storage through the S3-compatible API,
   `Entrada` and `_EntradaMedia` are created, then the user is asked for the
   description.
+- `Treinamento`: asks for company when needed, training theme, participant names
+  and CPFs, start/end date and time, one or more training photos, and a final
+  training PDF or photo. The training media is saved to Supabase Storage and
+  `_EntradaMedia`, with training metadata saved in `Treinamento`.
 - `Consulta`: returns the v1 relatorio placeholder.
 - `0`, `menu`, and `cancelar` reset the conversation.

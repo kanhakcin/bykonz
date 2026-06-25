@@ -20,13 +20,12 @@ const PHONE_WITHOUT_NINTH = "551199999999";
 const REPORTED_PHONE_WITH_NINTH = "5547996222708";
 const REPORTED_PHONE_WITHOUT_NINTH = "554799720053";
 const CATEGORY_OPTIONS = [
-  ["1", "Diario de obra"],
+  ["1", "Inspecao de servico"],
   ["2", "Abrir nao conformidade"],
-  ["3", "Inspecao de servico"],
-  ["4", "Recebimento de material"],
-  ["5", "Plano de manutencao"],
-  ["6", "Programa sol"],
-  ["7", "Treinamento"]
+  ["3", "Recebimento de material"],
+  ["4", "Plano de manutencao"],
+  ["5", "Programa sol"],
+  ["6", "Treinamento"]
 ] as const;
 
 class FakeStore implements ConversationStore {
@@ -181,8 +180,8 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("oi"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-    expect(messaging.messages.at(-1)?.text).toContain("1) Diario de obra");
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("1) Inspecao de servico");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("uses nested WAHA SenderAlt fields for phone lookup when from is a lid", async () => {
@@ -211,7 +210,7 @@ describe("ConversationService", () => {
     });
     expect(messaging.messages.at(-1)).toMatchObject({
       chatId: lidChatId,
-      text: expect.stringContaining("7) Treinamento")
+      text: expect.stringContaining("6) Treinamento")
     });
   });
 
@@ -225,7 +224,7 @@ describe("ConversationService", () => {
       phoneE164: PHONE,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("matches a database user stored without the ninth digit when WAHA includes it", async () => {
@@ -243,7 +242,7 @@ describe("ConversationService", () => {
       phoneE164: PHONE_WITHOUT_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("keeps the exact WAHA phone match when both Brazilian variants exist", async () => {
@@ -279,7 +278,7 @@ describe("ConversationService", () => {
       phoneE164: REPORTED_PHONE_WITH_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("starts the flow for a reported shorter stored number when WAHA includes a device suffix", async () => {
@@ -298,7 +297,7 @@ describe("ConversationService", () => {
       phoneE164: REPORTED_PHONE_WITHOUT_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("writes opt-in WAHA debug logs for successful lookups", async () => {
@@ -397,11 +396,11 @@ describe("ConversationService", () => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("8"));
+    await service.handleWebhook(textWebhook("7"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
     expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   it("re-shows the action menu after an invalid action", async () => {
@@ -413,7 +412,7 @@ describe("ConversationService", () => {
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "ACTION_MENU",
-      selectedTipo: "Diario de obra"
+      selectedTipo: "Inspecao de servico"
     });
     expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
     expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
@@ -425,7 +424,7 @@ describe("ConversationService", () => {
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("3"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_SERVICE_TYPE",
@@ -474,7 +473,7 @@ describe("ConversationService", () => {
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("3"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
     await service.handleWebhook(textWebhook("8"));
 
@@ -492,7 +491,7 @@ describe("ConversationService", () => {
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("3"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
     await service.handleWebhook(textWebhook("4"));
     await service.handleWebhook(textWebhook("   "));
@@ -536,7 +535,7 @@ describe("ConversationService", () => {
     ]);
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("5"));
+    await service.handleWebhook(textWebhook("4"));
     await service.handleWebhook(textWebhook("2"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("SELECT_EMPRESA");
@@ -560,7 +559,7 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("cancelar"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-    expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
   });
 
   describe("Consulta flow", () => {
@@ -574,7 +573,7 @@ describe("ConversationService", () => {
 
       expect(store.states.get(CHAT_ID)).toMatchObject({
         step: "AWAITING_REPORT_DATE",
-        selectedTipo: "Diario de obra",
+        selectedTipo: "Inspecao de servico",
         selectedEmpresaId: 10n
       });
       expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
@@ -646,7 +645,7 @@ describe("ConversationService", () => {
       expect(messaging.files).toHaveLength(0);
       const lastMsg = messaging.messages.at(-1)?.text ?? "";
       expect(lastMsg).toContain("Nenhum registro encontrado");
-      expect(lastMsg).toContain("7) Treinamento");
+      expect(lastMsg).toContain("6) Treinamento");
     });
 
     it("generates and sends a PDF when records are found, then resets to main menu", async () => {
@@ -657,7 +656,7 @@ describe("ConversationService", () => {
           id: 1n,
           description: "Parede concretada",
           createdAt: new Date("2026-06-22T10:00:00Z"),
-          tipo: "Diario de obra",
+          tipo: "Inspecao de servico",
           tipoServico: "Concretagem",
           numeroProcedimento: "PROC-45/2026",
           empresaNome: "Obra Centro",
@@ -673,7 +672,7 @@ describe("ConversationService", () => {
 
       expect(pdfGenerator.calls).toHaveLength(1);
       expect(pdfGenerator.calls[0]).toMatchObject({
-        categoria: "Diario de obra",
+        categoria: "Inspecao de servico",
         empresaNome: "Obra Centro",
         reportDate: "22/06/2026",
         entradas: [
@@ -688,7 +687,7 @@ describe("ConversationService", () => {
       expect(messaging.files[0].file.filename).toMatch(/\.pdf$/);
       expect(messaging.files[0].file.data).toBeTruthy();
       expect(store.states.has(CHAT_ID)).toBe(false);
-      expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
     });
 
     it("sends 'Gerando relatorio' before fetching entries", async () => {
@@ -719,7 +718,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("cancelar"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-      expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
     });
 
     it("reset commands work from AWAITING_REPORT_DATE state", async () => {
@@ -732,7 +731,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("0"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-      expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
     });
 
     it("rejects consulta when user has no empresa", async () => {

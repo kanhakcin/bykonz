@@ -18,9 +18,8 @@ export type FlowStep =
   | "AWAITING_REPORT_DATE";
 
 const ENTRY_TIPOS = [
-  "Diario de obra",
-  "Abrir nao conformidade",
   "Inspecao de servico",
+  "Abrir nao conformidade",
   "Recebimento de material",
   "Plano de manutencao",
   "Programa sol",
@@ -142,13 +141,12 @@ export interface ConversationServiceDeps {
 }
 
 const TIPO_OPTIONS: Record<string, EntryTipo> = {
-  "1": "Diario de obra",
+  "1": "Inspecao de servico",
   "2": "Abrir nao conformidade",
-  "3": "Inspecao de servico",
-  "4": "Recebimento de material",
-  "5": "Plano de manutencao",
-  "6": "Programa sol",
-  "7": "Treinamento"
+  "3": "Recebimento de material",
+  "4": "Plano de manutencao",
+  "5": "Programa sol",
+  "6": "Treinamento"
 };
 
 const ACTION_OPTIONS = {

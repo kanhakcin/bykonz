@@ -70,10 +70,9 @@ Prisma types generated from the checked-in schema.
 
 ## Flow
 
-- First message: replies with seven categories:
-  `Diario de obra`, `Abrir nao conformidade`, `Inspecao de servico`,
-  `Recebimento de material`, `Plano de manutencao`, `Programa sol`, and
-  `Treinamento`.
+- First message: replies with six categories:
+  `Inspecao de servico`, `Abrir nao conformidade`, `Recebimento de material`,
+  `Plano de manutencao`, `Programa sol`, and `Treinamento`.
 - Then asks for `Consulta` or `Incluir`.
 - `Incluir`: asks for company when needed, service type, procedure number, and
   photo. The photo is saved to Supabase Storage through the S3-compatible API,

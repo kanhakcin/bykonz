@@ -39,6 +39,14 @@ export class PdfReportGenerator implements PdfGenerator {
 
       doc.fontSize(10).font("Helvetica-Bold").text(`${time} - ${author}`);
 
+      if (entrada.tipoServico) {
+        doc.font("Helvetica").text(`Tipo de serviço: ${entrada.tipoServico}`);
+      }
+
+      if (entrada.numeroProcedimento) {
+        doc.font("Helvetica").text(`Procedimento: ${entrada.numeroProcedimento}`);
+      }
+
       if (entrada.description) {
         doc.font("Helvetica").text(entrada.description);
       }

@@ -17,6 +17,8 @@ enum ConversationStep {
   AWAITING_INSPECT_DATE
   SELECT_EMPRESA_FOR_REPORT
   AWAITING_REPORT_DATE
+  AWAITING_SERVICE_TYPE
+  AWAITING_PROCEDURE_NUMBER
 }
 
 model Usuario {
@@ -55,16 +57,18 @@ model UserEmpresa {
 }
 
 model Entrada {
-  id          BigInt   @id @default(autoincrement()) @db.BigInt
-  userId      Int      @map("User_id") @db.SmallInt
-  empresaId   BigInt?  @map("empresa_id") @db.BigInt
-  description String?  @map("Description")
-  createdAt   DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
-  tipo        String?  @map("Tipo")
+  id                 BigInt   @id @default(autoincrement()) @db.BigInt
+  userId             Int      @map("User_id") @db.SmallInt
+  empresaId          BigInt?  @map("empresa_id") @db.BigInt
+  description        String?  @map("Description")
+  createdAt          DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+  tipo               String?  @map("Tipo")
+  tipoServico        String?  @map("TipoServico")
+  numeroProcedimento String?  @map("NumeroProcedimento")
 
-  usuario Usuario       @relation(fields: [userId], references: [id], onDelete: Restrict)
-  empresa Empresa?      @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  usuario Usuario        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  empresa Empresa?       @relation(fields: [empresaId], references: [id], onDelete: SetNull)
   media   EntradaMedia[]
 
   @@map("Entrada")
@@ -81,15 +85,17 @@ model EntradaMedia {
 }
 
 model WhatsappConversationState {
-  id                BigInt           @id @default(autoincrement()) @db.BigInt
-  chatId            String           @unique @map("ChatId")
-  phoneE164         String           @map("PhoneE164")
-  step              ConversationStep @map("Step")
-  selectedTipo      String?          @map("SelectedTipo")
-  selectedEmpresaId BigInt?          @map("SelectedEmpresaId") @db.BigInt
-  pendingEntradaId  BigInt?          @map("PendingEntradaId") @db.BigInt
-  createdAt         DateTime         @default(now()) @map("CreatedAt") @db.Timestamptz(6)
-  updatedAt         DateTime         @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+  id                         BigInt           @id @default(autoincrement()) @db.BigInt
+  chatId                     String           @unique @map("ChatId")
+  phoneE164                  String           @map("PhoneE164")
+  step                       ConversationStep @map("Step")
+  selectedTipo               String?          @map("SelectedTipo")
+  selectedEmpresaId          BigInt?          @map("SelectedEmpresaId") @db.BigInt
+  selectedTipoServico        String?          @map("SelectedTipoServico")
+  selectedNumeroProcedimento String?          @map("SelectedNumeroProcedimento")
+  pendingEntradaId           BigInt?          @map("PendingEntradaId") @db.BigInt
+  createdAt                  DateTime         @default(now()) @map("CreatedAt") @db.Timestamptz(6)
+  updatedAt                  DateTime         @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
 
   @@map("WhatsappConversationState")
 }

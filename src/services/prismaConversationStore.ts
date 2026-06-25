@@ -64,6 +64,8 @@ export class PrismaConversationStore implements ConversationStore {
         step: input.step as PrismaConversationStep,
         selectedTipo: input.selectedTipo ?? null,
         selectedEmpresaId: input.selectedEmpresaId ?? null,
+        selectedTipoServico: input.selectedTipoServico ?? null,
+        selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
         pendingEntradaId: input.pendingEntradaId ?? null
       },
       update: {
@@ -71,6 +73,8 @@ export class PrismaConversationStore implements ConversationStore {
         step: input.step as PrismaConversationStep,
         selectedTipo: input.selectedTipo ?? null,
         selectedEmpresaId: input.selectedEmpresaId ?? null,
+        selectedTipoServico: input.selectedTipoServico ?? null,
+        selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
         pendingEntradaId: input.pendingEntradaId ?? null
       }
     });
@@ -90,6 +94,8 @@ export class PrismaConversationStore implements ConversationStore {
         userId: input.userId,
         empresaId: input.empresaId,
         tipo: input.tipo,
+        tipoServico: input.tipoServico,
+        numeroProcedimento: input.numeroProcedimento,
         description: input.description
       },
       select: { id: true }
@@ -142,6 +148,8 @@ export class PrismaConversationStore implements ConversationStore {
       description: e.description,
       createdAt: e.createdAt,
       tipo: e.tipo,
+      tipoServico: e.tipoServico,
+      numeroProcedimento: e.numeroProcedimento,
       empresaNome: e.empresa?.nome ?? null,
       usuarioNome: e.usuario.nome ?? null,
       mediaUrls: e.media.map((m) => m.mediaUrl)
@@ -155,6 +163,8 @@ function mapState(state: {
   step: string;
   selectedTipo: string | null;
   selectedEmpresaId: bigint | null;
+  selectedTipoServico: string | null;
+  selectedNumeroProcedimento: string | null;
   pendingEntradaId: bigint | null;
 }): ConversationStateRecord {
   return {
@@ -163,6 +173,8 @@ function mapState(state: {
     step: state.step as ConversationStateRecord["step"],
     selectedTipo: state.selectedTipo,
     selectedEmpresaId: state.selectedEmpresaId,
+    selectedTipoServico: state.selectedTipoServico,
+    selectedNumeroProcedimento: state.selectedNumeroProcedimento,
     pendingEntradaId: state.pendingEntradaId
   };
 }

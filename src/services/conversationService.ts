@@ -9,6 +9,8 @@ export type FlowStep =
   | "MAIN_MENU"
   | "ACTION_MENU"
   | "SELECT_EMPRESA"
+  | "AWAITING_SERVICE_TYPE"
+  | "AWAITING_PROCEDURE_NUMBER"
   | "AWAITING_PHOTO"
   | "AWAITING_DESCRIPTION"
   | "AWAITING_INSPECT_DATE"
@@ -27,6 +29,18 @@ const ENTRY_TIPOS = [
 
 export type EntryTipo = (typeof ENTRY_TIPOS)[number];
 
+const TIPO_SERVICOS = [
+  "Alvenaria",
+  "Hidráulica",
+  "Elétrica",
+  "Organização e Limpeza",
+  "Segurança",
+  "Concretagem",
+  "Outros"
+] as const;
+
+export type TipoServico = (typeof TIPO_SERVICOS)[number];
+
 export interface UserRecord {
   id: number;
   phoneE164: string;
@@ -44,6 +58,8 @@ export interface ConversationStateRecord {
   step: FlowStep;
   selectedTipo?: string | null;
   selectedEmpresaId?: bigint | null;
+  selectedTipoServico?: string | null;
+  selectedNumeroProcedimento?: string | null;
   pendingEntradaId?: bigint | null;
 }
 
@@ -53,6 +69,8 @@ export interface CreateEntradaInput {
   userId: number;
   empresaId: bigint;
   tipo: EntryTipo;
+  tipoServico: TipoServico;
+  numeroProcedimento: string;
   description: string;
 }
 
@@ -61,6 +79,8 @@ export interface EntradaForReport {
   description: string | null;
   createdAt: Date;
   tipo: string | null;
+  tipoServico: string | null;
+  numeroProcedimento: string | null;
   empresaNome: string | null;
   usuarioNome: string | null;
   mediaUrls: string[];
@@ -134,6 +154,16 @@ const TIPO_OPTIONS: Record<string, EntryTipo> = {
 const ACTION_OPTIONS = {
   consulta: "1",
   incluir: "2"
+};
+
+const TIPO_SERVICO_OPTIONS: Record<string, TipoServico> = {
+  "1": "Alvenaria",
+  "2": "Hidráulica",
+  "3": "Elétrica",
+  "4": "Organização e Limpeza",
+  "5": "Segurança",
+  "6": "Concretagem",
+  "7": "Outros"
 };
 
 const RESET_COMMANDS = new Set(["0", "menu", "cancelar"]);
@@ -221,6 +251,8 @@ export class ConversationService {
         step: "MAIN_MENU",
         selectedTipo: null,
         selectedEmpresaId: null,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
         pendingEntradaId: null
       });
       this.logWahaDebug("WAHA conversation state created", {
@@ -242,6 +274,12 @@ export class ConversationService {
         return;
       case "SELECT_EMPRESA":
         await this.handleEmpresaSelection(chatId, phoneE164, user.id, state, text);
+        return;
+      case "AWAITING_SERVICE_TYPE":
+        await this.handleServiceType(chatId, phoneE164, state, text);
+        return;
+      case "AWAITING_PROCEDURE_NUMBER":
+        await this.handleProcedureNumber(chatId, phoneE164, user.id, state, text);
         return;
       case "AWAITING_PHOTO":
         await this.handlePhoto(chatId, phoneE164, user.id, state, payload);
@@ -319,6 +357,8 @@ export class ConversationService {
       step: "ACTION_MENU",
       selectedTipo: tipo,
       selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
 
@@ -371,12 +411,14 @@ export class ConversationService {
       await this.deps.store.saveState({
         chatId,
         phoneE164,
-        step: "AWAITING_PHOTO",
+        step: "AWAITING_SERVICE_TYPE",
         selectedTipo: tipo,
         selectedEmpresaId: empresas[0].id,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
         pendingEntradaId: null
       });
-      await this.deps.messaging.sendText(chatId, this.photoPromptText(tipo, empresas[0]));
+      await this.deps.messaging.sendText(chatId, this.tipoServicoMenuText(tipo));
       return;
     }
 
@@ -386,6 +428,8 @@ export class ConversationService {
       step: "SELECT_EMPRESA",
       selectedTipo: tipo,
       selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
     await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
@@ -415,12 +459,84 @@ export class ConversationService {
     await this.deps.store.saveState({
       chatId,
       phoneE164,
-      step: "AWAITING_PHOTO",
+      step: "AWAITING_SERVICE_TYPE",
       selectedTipo: tipo,
       selectedEmpresaId: empresa.id,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, this.photoPromptText(tipo, empresa));
+    await this.deps.messaging.sendText(chatId, this.tipoServicoMenuText(tipo));
+  }
+
+  private async handleServiceType(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const tipoServico = TIPO_SERVICO_OPTIONS[text];
+    if (!tipoServico) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.tipoServicoMenuText(tipo)}`);
+      return;
+    }
+
+    await this.deps.store.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_PROCEDURE_NUMBER",
+      selectedTipo: tipo,
+      selectedEmpresaId: state.selectedEmpresaId,
+      selectedTipoServico: tipoServico,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+
+    await this.deps.messaging.sendText(chatId, this.numeroProcedimentoPromptText());
+  }
+
+  private async handleProcedureNumber(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    const tipoServico = this.requireSelectedTipoServico(state);
+    if (!tipo || !state.selectedEmpresaId || !tipoServico) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const numeroProcedimento = text.trim();
+    if (!numeroProcedimento) {
+      await this.deps.messaging.sendText(chatId, this.numeroProcedimentoPromptText());
+      return;
+    }
+
+    const empresa = await this.findSelectedEmpresaForUser(userId, state.selectedEmpresaId);
+    await this.deps.store.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_PHOTO",
+      selectedTipo: tipo,
+      selectedEmpresaId: state.selectedEmpresaId,
+      selectedTipoServico: tipoServico,
+      selectedNumeroProcedimento: numeroProcedimento,
+      pendingEntradaId: null
+    });
+
+    await this.deps.messaging.sendText(
+      chatId,
+      this.photoPromptText(tipo, empresa, tipoServico, numeroProcedimento)
+    );
   }
 
   private async handlePhoto(
@@ -431,7 +547,9 @@ export class ConversationService {
     payload: WahaMessagePayload
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo || !state.selectedEmpresaId) {
+    const tipoServico = this.requireSelectedTipoServico(state);
+    const numeroProcedimento = state.selectedNumeroProcedimento?.trim();
+    if (!tipo || !state.selectedEmpresaId || !tipoServico || !numeroProcedimento) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -468,6 +586,8 @@ export class ConversationService {
         userId,
         empresaId: state.selectedEmpresaId,
         tipo,
+        tipoServico,
+        numeroProcedimento,
         description: ""
       });
 
@@ -482,6 +602,8 @@ export class ConversationService {
         step: "AWAITING_DESCRIPTION",
         selectedTipo: tipo,
         selectedEmpresaId: state.selectedEmpresaId,
+        selectedTipoServico: tipoServico,
+        selectedNumeroProcedimento: numeroProcedimento,
         pendingEntradaId: entrada.id
       });
 
@@ -657,6 +779,8 @@ export class ConversationService {
       step: "MAIN_MENU",
       selectedTipo: null,
       selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
     await this.deps.messaging.sendText(chatId, this.mainMenuText());
@@ -666,9 +790,22 @@ export class ConversationService {
     return RESET_COMMANDS.has(text.toLowerCase());
   }
 
+  private async findSelectedEmpresaForUser(userId: number, empresaId: bigint): Promise<EmpresaRecord> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    return empresas.find((empresa) => empresa.id === empresaId) ?? { id: empresaId, nome: null };
+  }
+
   private requireSelectedTipo(state: ConversationStateRecord): EntryTipo | null {
     if (isEntryTipo(state.selectedTipo)) {
       return state.selectedTipo;
+    }
+
+    return null;
+  }
+
+  private requireSelectedTipoServico(state: ConversationStateRecord): TipoServico | null {
+    if (isTipoServico(state.selectedTipoServico)) {
+      return state.selectedTipoServico;
     }
 
     return null;
@@ -691,9 +828,23 @@ export class ConversationService {
     return `Escolha a empresa:\n${options}\n\nDigite 0 para voltar ao menu.`;
   }
 
-  private photoPromptText(tipo: EntryTipo, empresa: EmpresaRecord): string {
+  private tipoServicoMenuText(tipo: EntryTipo): string {
+    const options = TIPO_SERVICOS.map((tipoServico, index) => `${index + 1}) ${tipoServico}`).join("\n");
+    return `${tipo}\nEscolha o tipo de serviço:\n${options}\n\nDigite 0 para voltar ao menu.`;
+  }
+
+  private numeroProcedimentoPromptText(): string {
+    return "Informe o número do procedimento utilizado.";
+  }
+
+  private photoPromptText(
+    tipo: EntryTipo,
+    empresa: EmpresaRecord,
+    tipoServico: TipoServico,
+    numeroProcedimento: string
+  ): string {
     const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
-    return `${tipo} - ${empresaNome}\nEnvie uma foto para incluir no registro.`;
+    return `${tipo} - ${empresaNome}\nTipo de serviço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\nEnvie uma foto para incluir no registro.`;
   }
 }
 
@@ -704,6 +855,10 @@ function isWahaDebugLoggingEnabled(): boolean {
 
 function isEntryTipo(value: string | null | undefined): value is EntryTipo {
   return typeof value === "string" && (ENTRY_TIPOS as readonly string[]).includes(value);
+}
+
+function isTipoServico(value: string | null | undefined): value is TipoServico {
+  return typeof value === "string" && (TIPO_SERVICOS as readonly string[]).includes(value);
 }
 
 function parseReportDate(text: string): { start: Date; end: Date } | null {

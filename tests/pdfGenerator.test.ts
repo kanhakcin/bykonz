@@ -30,6 +30,8 @@ describe("PdfReportGenerator", () => {
           description: "Parede concretada",
           createdAt: new Date("2026-06-22T10:00:00Z"),
           tipo: "Diario de obra",
+          tipoServico: "Concretagem",
+          numeroProcedimento: "PROC-45/2026",
           empresaNome: "Obra Centro",
           usuarioNome: "Joao",
           mediaUrls: []
@@ -64,6 +66,8 @@ describe("PdfReportGenerator", () => {
           description: null,
           createdAt: new Date(),
           tipo: null,
+          tipoServico: null,
+          numeroProcedimento: null,
           empresaNome: null,
           usuarioNome: null,
           mediaUrls: ["entradas/10/7/2026-06-22/photo.jpg", "entradas/10/7/2026-06-22/other.png"]
@@ -96,6 +100,8 @@ describe("PdfReportGenerator", () => {
           description: "test",
           createdAt: new Date(),
           tipo: null,
+          tipoServico: null,
+          numeroProcedimento: null,
           empresaNome: null,
           usuarioNome: null,
           mediaUrls: ["photo.webp", "photo.gif", "photo.jpg"]
@@ -126,6 +132,8 @@ describe("PdfReportGenerator", () => {
           description: null,
           createdAt: new Date(),
           tipo: null,
+          tipoServico: null,
+          numeroProcedimento: null,
           empresaNome: null,
           usuarioNome: null,
           mediaUrls: ["entradas/10/7/2026-06-22/photo.jpg"]

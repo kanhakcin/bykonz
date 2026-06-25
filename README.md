@@ -47,6 +47,27 @@ npm run build
 npm start
 ```
 
+## Render deployment
+
+Use these commands in Render:
+
+```bash
+# Build command
+npm run build
+
+# Start command
+npm start
+```
+
+Before the new code serves traffic, apply production migrations:
+
+```bash
+npm run prisma:migrate:deploy
+```
+
+`npm run build` runs `prisma generate` before TypeScript compiles so Render uses
+Prisma types generated from the checked-in schema.
+
 ## Flow
 
 - First message: replies with seven categories:

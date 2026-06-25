@@ -301,6 +301,60 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("7) Treinamento");
   });
 
+  it("writes opt-in WAHA debug logs for successful lookups", async () => {
+    const { service } = createHarness();
+    const previousDebugLogs = process.env.WAHA_DEBUG_LOGS;
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    process.env.WAHA_DEBUG_LOGS = "1";
+
+    try {
+      await service.handleWebhook(textWebhook("oi"));
+
+      expect(infoSpy).toHaveBeenCalledWith(
+        "WAHA webhook phone lookup started",
+        expect.objectContaining({
+          event: "message",
+          session: "default",
+          chatId: CHAT_ID,
+          payloadFrom: CHAT_ID,
+          payloadChatId: null,
+          wahaPhoneDigits: PHONE,
+          phoneLookupCandidates: [PHONE, PHONE_WITHOUT_NINTH]
+        })
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        "WAHA phone lookup matched registered user",
+        expect.objectContaining({
+          chatId: CHAT_ID,
+          matchedPhoneE164: PHONE,
+          userId: 7
+        })
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        "WAHA conversation state loaded",
+        expect.objectContaining({
+          chatId: CHAT_ID,
+          stateStep: null,
+          textLength: 2
+        })
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        "WAHA conversation state created",
+        expect.objectContaining({
+          chatId: CHAT_ID,
+          step: "MAIN_MENU"
+        })
+      );
+    } finally {
+      if (previousDebugLogs === undefined) {
+        delete process.env.WAHA_DEBUG_LOGS;
+      } else {
+        process.env.WAHA_DEBUG_LOGS = previousDebugLogs;
+      }
+      infoSpy.mockRestore();
+    }
+  });
+
   it("rejects unknown users", async () => {
     const { service, messaging } = createHarness();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -309,7 +363,13 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("oi", "5511888888888@c.us"));
       expect(messaging.messages.at(-1)?.text).toContain("Numero nao cadastrado");
       expect(warnSpy).toHaveBeenCalledWith("WAHA phone lookup did not match a registered user", {
+        event: "message",
+        session: "default",
         chatId: "5511888888888@c.us",
+        payloadFrom: "5511888888888@c.us",
+        payloadChatId: null,
+        sender: null,
+        senderAlt: null,
         wahaPhoneDigits: "5511888888888",
         phoneLookupCandidates: ["5511888888888"]
       });

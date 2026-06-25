@@ -1,5 +1,9 @@
 import type { WahaMessagePayload, WahaWebhook } from "../types/waha";
-import { extractPhoneFromWahaPayload, getWahaPhoneLookupCandidates } from "../utils/phone";
+import {
+  extractPhoneFromWahaPayload,
+  getWahaPhoneLookupCandidates,
+  readNestedString
+} from "../utils/phone";
 
 export type FlowStep =
   | "MAIN_MENU"
@@ -150,10 +154,25 @@ export class ConversationService {
 
     const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
     const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);
+    const phoneDebugFields = this.wahaPhoneDebugFields(payload);
+    this.logWahaDebug("WAHA webhook phone lookup started", {
+      event: webhook.event,
+      session: webhook.session,
+      chatId,
+      hasMedia: payload.hasMedia ?? false,
+      source: payload.source ?? null,
+      ...phoneDebugFields,
+      wahaPhoneDigits,
+      phoneLookupCandidates
+    });
+
     const user = await this.findUserByWahaPhone(phoneLookupCandidates);
     if (!user) {
       console.warn("WAHA phone lookup did not match a registered user", {
+        event: webhook.event,
+        session: webhook.session,
         chatId,
+        ...phoneDebugFields,
         wahaPhoneDigits,
         phoneLookupCandidates
       });
@@ -165,13 +184,36 @@ export class ConversationService {
     }
 
     const phoneE164 = user.phoneE164;
+    this.logWahaDebug("WAHA phone lookup matched registered user", {
+      chatId,
+      wahaPhoneDigits,
+      phoneLookupCandidates,
+      matchedPhoneE164: phoneE164,
+      userId: user.id
+    });
+
     const text = (payload.body ?? "").trim();
     if (this.isResetCommand(text)) {
+      this.logWahaDebug("WAHA reset command received", {
+        chatId,
+        phoneE164,
+        userId: user.id,
+        command: text.toLowerCase()
+      });
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const state = await this.deps.store.getState(chatId);
+    this.logWahaDebug("WAHA conversation state loaded", {
+      chatId,
+      phoneE164,
+      userId: user.id,
+      stateStep: state?.step ?? null,
+      hasMedia: payload.hasMedia ?? false,
+      textLength: text.length
+    });
+
     if (!state) {
       await this.deps.store.saveState({
         chatId,
@@ -180,6 +222,12 @@ export class ConversationService {
         selectedTipo: null,
         selectedEmpresaId: null,
         pendingEntradaId: null
+      });
+      this.logWahaDebug("WAHA conversation state created", {
+        chatId,
+        phoneE164,
+        userId: user.id,
+        step: "MAIN_MENU"
       });
       await this.deps.messaging.sendText(chatId, this.mainMenuText());
       return;
@@ -222,6 +270,24 @@ export class ConversationService {
     }
 
     return null;
+  }
+
+  private wahaPhoneDebugFields(payload: WahaMessagePayload): Record<string, string | null> {
+    return {
+      payloadFrom: payload.from ?? null,
+      payloadChatId: payload.chatId ?? null,
+      sender: readNestedString(payload, ["_data", "Info", "Sender"]) ?? readNestedString(payload, ["_data", "Sender"]) ?? null,
+      senderAlt:
+        readNestedString(payload, ["_data", "Info", "SenderAlt"]) ??
+        readNestedString(payload, ["_data", "SenderAlt"]) ??
+        null
+    };
+  }
+
+  private logWahaDebug(message: string, details: Record<string, unknown>): void {
+    if (isWahaDebugLoggingEnabled()) {
+      console.info(message, details);
+    }
   }
 
   private isSupportedWebhook(webhook: WahaWebhook): webhook is WahaWebhook & { payload: WahaMessagePayload } {
@@ -629,6 +695,11 @@ export class ConversationService {
     const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
     return `${tipo} - ${empresaNome}\nEnvie uma foto para incluir no registro.`;
   }
+}
+
+function isWahaDebugLoggingEnabled(): boolean {
+  const value = process.env.WAHA_DEBUG_LOGS?.toLowerCase();
+  return value === "1" || value === "true" || value === "yes";
 }
 
 function isEntryTipo(value: string | null | undefined): value is EntryTipo {

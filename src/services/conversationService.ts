@@ -310,6 +310,12 @@ export class ConversationService {
         userId: user.id,
         step: "MAIN_MENU"
       });
+
+      if (this.isMainMenuSelection(text)) {
+        await this.handleMainMenu(chatId, phoneE164, user.id, text);
+        return;
+      }
+
       await this.deps.messaging.sendText(chatId, this.mainMenuText());
       return;
     }
@@ -1210,6 +1216,10 @@ export class ConversationService {
 
   private isResetCommand(text: string): boolean {
     return RESET_COMMANDS.has(text.toLowerCase());
+  }
+
+  private isMainMenuSelection(text: string): boolean {
+    return text === DIARIO_OBRA_REPORT_OPTION || text in TIPO_OPTIONS;
   }
 
   private async findSelectedEmpresaForUser(userId: number, empresaId: bigint): Promise<EmpresaRecord> {

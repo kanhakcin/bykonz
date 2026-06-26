@@ -451,6 +451,38 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).not.toContain("2) Incluir");
   });
 
+  it("routes a first message main-menu selection instead of re-sending the main menu", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("6"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_TEMA",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: 10n
+    });
+    expect(messaging.messages).toHaveLength(1);
+    expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
+    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
+  });
+
+  it("routes first-message Gerar diario de obra selection into the report flow", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("7"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_REPORT_DATE",
+      selectedTipo: "Inspecao de servico",
+      selectedEmpresaId: 10n
+    });
+    expect(messaging.messages).toHaveLength(1);
+    expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
+    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
+  });
+
   it("runs the Treinamento flow with tema, participants, dates, photos, and file upload", async () => {
     const { service, store, messaging, storage } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);

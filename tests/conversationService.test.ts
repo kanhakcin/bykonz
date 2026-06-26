@@ -20,8 +20,7 @@ const PHONE = "5511999999999";
 const PHONE_WITHOUT_NINTH = "551199999999";
 const REPORTED_PHONE_WITH_NINTH = "5547996222708";
 const REPORTED_PHONE_WITHOUT_NINTH = "554799720053";
-const ACTION_MENU_CATEGORY_OPTIONS = [
-  ["1", "Inspecao de servico"],
+const CONSULTA_ACTION_MENU_CATEGORY_OPTIONS = [
   ["2", "Abrir nao conformidade"],
   ["3", "Recebimento de material"],
   ["4", "Plano de manutencao"],
@@ -222,6 +221,7 @@ describe("ConversationService", () => {
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
     expect(messaging.messages.at(-1)?.text).toContain("1) Inspecao de servico");
     expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
   it("uses nested WAHA SenderAlt fields for phone lookup when from is a lid", async () => {
@@ -250,7 +250,7 @@ describe("ConversationService", () => {
     });
     expect(messaging.messages.at(-1)).toMatchObject({
       chatId: lidChatId,
-      text: expect.stringContaining("6) Treinamento")
+      text: expect.stringContaining("7) Gerar diario de obra")
     });
   });
 
@@ -264,7 +264,7 @@ describe("ConversationService", () => {
       phoneE164: PHONE,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
   it("matches a database user stored without the ninth digit when WAHA includes it", async () => {
@@ -282,7 +282,7 @@ describe("ConversationService", () => {
       phoneE164: PHONE_WITHOUT_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
   it("keeps the exact WAHA phone match when both Brazilian variants exist", async () => {
@@ -318,7 +318,7 @@ describe("ConversationService", () => {
       phoneE164: REPORTED_PHONE_WITH_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
   it("starts the flow for a reported shorter stored number when WAHA includes a device suffix", async () => {
@@ -337,7 +337,7 @@ describe("ConversationService", () => {
       phoneE164: REPORTED_PHONE_WITHOUT_NINTH,
       step: "MAIN_MENU"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
   it("writes opt-in WAHA debug logs for successful lookups", async () => {
@@ -417,19 +417,38 @@ describe("ConversationService", () => {
     }
   });
 
-  it.each(ACTION_MENU_CATEGORY_OPTIONS)("selects %s as %s and shows the action menu", async (option, tipo) => {
+  it.each(CONSULTA_ACTION_MENU_CATEGORY_OPTIONS)(
+    "selects %s as %s and shows the consulta/incluir action menu",
+    async (option, tipo) => {
+      const { service, store, messaging } = createHarness();
+
+      await service.handleWebhook(textWebhook("oi"));
+      await service.handleWebhook(textWebhook(option));
+
+      expect(store.states.get(CHAT_ID)).toMatchObject({
+        step: "ACTION_MENU",
+        selectedTipo: tipo
+      });
+      expect(messaging.messages.at(-1)?.text).toContain(tipo);
+      expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
+      expect(messaging.messages.at(-1)?.text).toContain("2) Incluir");
+    }
+  );
+
+  it("selects Inspecao de servico and shows only the Incluir action", async () => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook(option));
+    await service.handleWebhook(textWebhook("1"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "ACTION_MENU",
-      selectedTipo: tipo
+      selectedTipo: "Inspecao de servico"
     });
-    expect(messaging.messages.at(-1)?.text).toContain(tipo);
-    expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
-    expect(messaging.messages.at(-1)?.text).toContain("2) Incluir");
+    expect(messaging.messages.at(-1)?.text).toContain("Inspecao de servico");
+    expect(messaging.messages.at(-1)?.text).toContain("1) Incluir");
+    expect(messaging.messages.at(-1)?.text).not.toContain("Consulta");
+    expect(messaging.messages.at(-1)?.text).not.toContain("2) Incluir");
   });
 
   it("runs the Treinamento flow with tema, participants, dates, photos, and file upload", async () => {
@@ -559,14 +578,14 @@ describe("ConversationService", () => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
-    await service.handleWebhook(textWebhook("7"));
+    await service.handleWebhook(textWebhook("8"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
     expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
-  it("re-shows the action menu after an invalid action", async () => {
+  it("re-shows the include-only action menu after an invalid Inspecao action", async () => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
@@ -576,6 +595,22 @@ describe("ConversationService", () => {
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "ACTION_MENU",
       selectedTipo: "Inspecao de servico"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
+    expect(messaging.messages.at(-1)?.text).toContain("1) Incluir");
+    expect(messaging.messages.at(-1)?.text).not.toContain("Consulta");
+  });
+
+  it("re-shows the consulta/incluir action menu after an invalid regular action", async () => {
+    const { service, store, messaging } = createHarness();
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("9"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "ACTION_MENU",
+      selectedTipo: "Abrir nao conformidade"
     });
     expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
     expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
@@ -588,7 +623,7 @@ describe("ConversationService", () => {
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("1"));
-    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("1"));
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_SERVICE_TYPE",
       selectedTipo: "Inspecao de servico",
@@ -637,7 +672,7 @@ describe("ConversationService", () => {
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("1"));
-    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("8"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -655,7 +690,7 @@ describe("ConversationService", () => {
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("1"));
-    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("4"));
     await service.handleWebhook(textWebhook("   "));
 
@@ -677,7 +712,7 @@ describe("ConversationService", () => {
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("1"));
-    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("6"));
     await service.handleWebhook(textWebhook("99-A"));
     await service.handleWebhook(photoWebhook());
@@ -722,17 +757,16 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("cancelar"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-    expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
-  describe("Consulta flow", () => {
+  describe("Gerar diario de obra flow", () => {
     it("with one empresa goes directly to AWAITING_REPORT_DATE and asks for date", async () => {
       const { service, store, messaging } = createHarness();
       store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
 
       expect(store.states.get(CHAT_ID)).toMatchObject({
         step: "AWAITING_REPORT_DATE",
@@ -750,8 +784,7 @@ describe("ConversationService", () => {
       ]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("SELECT_EMPRESA_FOR_REPORT");
       expect(messaging.messages.at(-1)?.text).toContain("1) Obra Centro");
@@ -771,8 +804,7 @@ describe("ConversationService", () => {
       store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("32/13/2026"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
@@ -785,8 +817,7 @@ describe("ConversationService", () => {
       store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("31/04/2026"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
@@ -799,8 +830,7 @@ describe("ConversationService", () => {
       store.reportEntradas = [];
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("22/06/2026"));
 
       expect(store.states.has(CHAT_ID)).toBe(false);
@@ -808,7 +838,7 @@ describe("ConversationService", () => {
       expect(messaging.files).toHaveLength(0);
       const lastMsg = messaging.messages.at(-1)?.text ?? "";
       expect(lastMsg).toContain("Nenhum registro encontrado");
-      expect(lastMsg).toContain("6) Treinamento");
+      expect(lastMsg).toContain("7) Gerar diario de obra");
     });
 
     it("generates and sends a PDF when records are found, then resets to main menu", async () => {
@@ -829,8 +859,7 @@ describe("ConversationService", () => {
       ];
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("22/06/2026"));
 
       expect(pdfGenerator.calls).toHaveLength(1);
@@ -850,7 +879,7 @@ describe("ConversationService", () => {
       expect(messaging.files[0].file.filename).toMatch(/\.pdf$/);
       expect(messaging.files[0].file.data).toBeTruthy();
       expect(store.states.has(CHAT_ID)).toBe(false);
-      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
     it("sends 'Gerando relatorio' before fetching entries", async () => {
@@ -859,8 +888,7 @@ describe("ConversationService", () => {
       store.reportEntradas = [];
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("22/06/2026"));
 
       const allTexts = messaging.messages.map((m) => m.text);
@@ -876,12 +904,11 @@ describe("ConversationService", () => {
       ]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("cancelar"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
     it("reset commands work from AWAITING_REPORT_DATE state", async () => {
@@ -889,12 +916,11 @@ describe("ConversationService", () => {
       store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("0"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-      expect(messaging.messages.at(-1)?.text).toContain("6) Treinamento");
+      expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
     it("rejects consulta when user has no empresa", async () => {
@@ -902,8 +928,7 @@ describe("ConversationService", () => {
       store.empresasByUser.set(7, []);
 
       await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("1"));
-      await service.handleWebhook(textWebhook("1"));
+      await service.handleWebhook(textWebhook("7"));
 
       expect(store.states.has(CHAT_ID)).toBe(false);
       expect(messaging.messages.at(-1)?.text).toContain("Nenhuma empresa vinculada");

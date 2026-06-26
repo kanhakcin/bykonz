@@ -34,6 +34,15 @@ const ENTRY_TIPOS = [
 
 export type EntryTipo = (typeof ENTRY_TIPOS)[number];
 
+const DIARIO_OBRA_REPORT_OPTION = "7";
+const DIARIO_OBRA_REPORT_LABEL = "Gerar diario de obra";
+const DIARIO_OBRA_REPORT_TIPO: EntryTipo = "Inspecao de servico";
+
+const MAIN_MENU_OPTIONS = [
+  ...ENTRY_TIPOS.map((tipo, index) => ({ option: `${index + 1}`, label: tipo })),
+  { option: DIARIO_OBRA_REPORT_OPTION, label: DIARIO_OBRA_REPORT_LABEL }
+] as const;
+
 const TIPO_SERVICOS = [
   "Alvenaria",
   "Hidráulica",
@@ -184,6 +193,10 @@ const TIPO_OPTIONS: Record<string, EntryTipo> = {
 const ACTION_OPTIONS = {
   consulta: "1",
   incluir: "2"
+};
+
+const INCLUDE_ONLY_ACTION_OPTIONS = {
+  incluir: "1"
 };
 
 const TIPO_SERVICO_OPTIONS: Record<string, TipoServico> = {
@@ -399,6 +412,11 @@ export class ConversationService {
   }
 
   private async handleMainMenu(chatId: string, phoneE164: string, userId: number, text: string): Promise<void> {
+    if (text === DIARIO_OBRA_REPORT_OPTION) {
+      await this.handleConsultaForTipo(chatId, phoneE164, userId, DIARIO_OBRA_REPORT_TIPO);
+      return;
+    }
+
     const tipo = TIPO_OPTIONS[text];
     if (!tipo) {
       await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.mainMenuText()}`);
@@ -434,6 +452,16 @@ export class ConversationService {
     const tipo = this.requireSelectedTipo(state);
     if (!tipo) {
       await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    if (this.usesIncludeOnlyActionMenu(tipo)) {
+      if (text === INCLUDE_ONLY_ACTION_OPTIONS.incluir) {
+        await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
+        return;
+      }
+
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.actionMenuText(tipo)}`);
       return;
     }
 
@@ -1030,6 +1058,15 @@ export class ConversationService {
       return;
     }
 
+    await this.handleConsultaForTipo(chatId, phoneE164, userId, tipo);
+  }
+
+  private async handleConsultaForTipo(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    tipo: EntryTipo
+  ): Promise<void> {
     const empresas = await this.deps.store.findEmpresasByUser(userId);
     if (empresas.length === 0) {
       await this.deps.store.clearState(chatId);
@@ -1196,12 +1233,20 @@ export class ConversationService {
     return null;
   }
 
+  private usesIncludeOnlyActionMenu(tipo: EntryTipo): boolean {
+    return tipo === DIARIO_OBRA_REPORT_TIPO;
+  }
+
   private mainMenuText(): string {
-    const options = ENTRY_TIPOS.map((tipo, index) => `${index + 1}) ${tipo}`).join("\n");
+    const options = MAIN_MENU_OPTIONS.map((option) => `${option.option}) ${option.label}`).join("\n");
     return `O que voce quer acessar?\n${options}\n\nDigite 0 para voltar ao menu.`;
   }
 
   private actionMenuText(tipo: EntryTipo): string {
+    if (this.usesIncludeOnlyActionMenu(tipo)) {
+      return `${tipo}\n1) Incluir\n\nDigite 0 para voltar ao menu.`;
+    }
+
     return `${tipo}\n1) Consulta\n2) Incluir\n\nDigite 0 para voltar ao menu.`;
   }
 

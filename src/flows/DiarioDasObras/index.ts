@@ -28,6 +28,20 @@ import {
   TIPO_OPTIONS
 } from "./menu";
 import {
+  isMaterialFlowStepKey,
+  MATERIAL_FLOW_DATA_KEYS,
+  MATERIAL_FLOW_STEPS,
+  MATERIAL_MEDIA_TYPES,
+  MATERIAL_TIPO,
+  materialNotaPhotoPromptText,
+  materialOsPromptText,
+  materialPhotoPromptText,
+  materialQualityPromptText,
+  materialQuantityPromptText,
+  parseMaterialAnswer,
+  type MaterialAnswer
+} from "./recebimentoMaterial";
+import {
   TRAINING_MEDIA_TYPES,
   TRAINING_PHOTO_DONE_COMMANDS,
   type TrainingMediaType,
@@ -96,6 +110,21 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         return;
       case "AWAITING_DESCRIPTION":
         await this.handleDescription(input.chatId, state, input.text);
+        return;
+      case MATERIAL_FLOW_STEPS.awaitingOs:
+        await this.handleMaterialOs(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case MATERIAL_FLOW_STEPS.awaitingNotaPhoto:
+        await this.handleMaterialNotaPhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
+        return;
+      case MATERIAL_FLOW_STEPS.awaitingMaterialPhoto:
+        await this.handleMaterialPhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
+        return;
+      case MATERIAL_FLOW_STEPS.awaitingQuantity:
+        await this.handleMaterialQuantity(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case MATERIAL_FLOW_STEPS.awaitingQuality:
+        await this.handleMaterialQuality(input.chatId, input.phoneE164, state, input.text);
         return;
       case "AWAITING_INSPECT_DATE":
         await this.resetToMenu(input.chatId, input.phoneE164);
@@ -213,17 +242,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     if (empresas.length === 1) {
-      await this.saveState({
-        chatId,
-        phoneE164,
-        step: "AWAITING_SERVICE_TYPE",
-        selectedTipo: tipo,
-        selectedEmpresaId: empresas[0].id,
-        selectedTipoServico: null,
-        selectedNumeroProcedimento: null,
-        pendingEntradaId: null
-      });
-      await this.deps.messaging.sendText(chatId, tipoServicoMenuText(tipo));
+      await this.startAddForEmpresa(chatId, phoneE164, tipo, empresas[0].id);
       return;
     }
 
@@ -261,12 +280,38 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
+    await this.startAddForEmpresa(chatId, phoneE164, tipo, empresa.id);
+  }
+
+  private async startAddForEmpresa(
+    chatId: string,
+    phoneE164: string,
+    tipo: EntryTipo,
+    empresaId: bigint
+  ): Promise<void> {
+    if (tipo === MATERIAL_TIPO) {
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_PROCEDURE_NUMBER",
+        stepKey: MATERIAL_FLOW_STEPS.awaitingOs,
+        selectedTipo: tipo,
+        selectedEmpresaId: empresaId,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
+        pendingEntradaId: null,
+        flowData: {}
+      });
+      await this.deps.messaging.sendText(chatId, materialOsPromptText());
+      return;
+    }
+
     await this.saveState({
       chatId,
       phoneE164,
       step: "AWAITING_SERVICE_TYPE",
       selectedTipo: tipo,
-      selectedEmpresaId: empresa.id,
+      selectedEmpresaId: empresaId,
       selectedTipoServico: null,
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
@@ -759,6 +804,267 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
   }
 
+  private async handleMaterialOs(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const numeroOs = text.trim();
+    if (!numeroOs) {
+      await this.deps.messaging.sendText(chatId, materialOsPromptText());
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_PHOTO",
+      stepKey: MATERIAL_FLOW_STEPS.awaitingNotaPhoto,
+      selectedTipo: MATERIAL_TIPO,
+      selectedEmpresaId: state.selectedEmpresaId,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: numeroOs,
+      pendingEntradaId: null,
+      flowData: {}
+    });
+    await this.deps.messaging.sendText(chatId, materialNotaPhotoPromptText());
+  }
+
+  private async handleMaterialNotaPhoto(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    const numeroOs = state.selectedNumeroProcedimento?.trim();
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !numeroOs) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const objectPath = await this.uploadMaterialImage({
+      chatId,
+      userId,
+      empresaId: state.selectedEmpresaId,
+      payload,
+      missingMessage: "Envie a foto da nota para continuar.",
+      invalidMessage: "O arquivo precisa ser uma imagem. Envie a foto da nota."
+    });
+    if (!objectPath) {
+      return;
+    }
+
+    try {
+      const entrada = await this.deps.store.createEntrada({
+        userId,
+        empresaId: state.selectedEmpresaId,
+        tipo: MATERIAL_TIPO,
+        tipoServico: null,
+        numeroProcedimento: numeroOs,
+        description: ""
+      });
+
+      await this.deps.store.addEntradaMedia({
+        entradaId: entrada.id,
+        mediaUrl: objectPath,
+        mediaTipo: MATERIAL_MEDIA_TYPES.nota
+      });
+
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_PHOTO",
+        stepKey: MATERIAL_FLOW_STEPS.awaitingMaterialPhoto,
+        selectedTipo: MATERIAL_TIPO,
+        selectedEmpresaId: state.selectedEmpresaId,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: numeroOs,
+        pendingEntradaId: entrada.id,
+        flowData: {}
+      });
+      await this.deps.messaging.sendText(chatId, materialPhotoPromptText());
+    } catch (error) {
+      console.error("Failed to save material receipt note photo", error);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+      );
+    }
+  }
+
+  private async handleMaterialPhoto(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    const numeroOs = state.selectedNumeroProcedimento?.trim();
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !state.pendingEntradaId || !numeroOs) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const objectPath = await this.uploadMaterialImage({
+      chatId,
+      userId,
+      empresaId: state.selectedEmpresaId,
+      payload,
+      missingMessage: "Envie a foto do material para continuar.",
+      invalidMessage: "O arquivo precisa ser uma imagem. Envie a foto do material."
+    });
+    if (!objectPath) {
+      return;
+    }
+
+    try {
+      await this.deps.store.addEntradaMedia({
+        entradaId: state.pendingEntradaId,
+        mediaUrl: objectPath,
+        mediaTipo: MATERIAL_MEDIA_TYPES.material
+      });
+
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_DESCRIPTION",
+        stepKey: MATERIAL_FLOW_STEPS.awaitingQuantity,
+        selectedTipo: MATERIAL_TIPO,
+        selectedEmpresaId: state.selectedEmpresaId,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: numeroOs,
+        pendingEntradaId: state.pendingEntradaId,
+        flowData: {}
+      });
+      await this.deps.messaging.sendText(chatId, materialQuantityPromptText());
+    } catch (error) {
+      console.error("Failed to save material receipt material photo", error);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+      );
+    }
+  }
+
+  private async handleMaterialQuantity(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const answer = parseMaterialAnswer(text);
+    if (!answer) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${materialQuantityPromptText()}`);
+      return;
+    }
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_DESCRIPTION",
+      stepKey: MATERIAL_FLOW_STEPS.awaitingQuality,
+      flowData: {
+        ...flowDataObject(state.flowData),
+        [MATERIAL_FLOW_DATA_KEYS.quantidadeCorreta]: answer
+      }
+    });
+    await this.deps.messaging.sendText(chatId, materialQualityPromptText());
+  }
+
+  private async handleMaterialQuality(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const quantidadeCorreta = materialAnswerFromData(
+      state.flowData,
+      MATERIAL_FLOW_DATA_KEYS.quantidadeCorreta
+    );
+    if (!quantidadeCorreta) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const qualidadeCorreta = parseMaterialAnswer(text);
+    if (!qualidadeCorreta) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${materialQualityPromptText()}`);
+      return;
+    }
+
+    await this.deps.store.updateEntradaDescription(
+      state.pendingEntradaId,
+      buildMaterialDescription(quantidadeCorreta, qualidadeCorreta)
+    );
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
+  }
+
+  private async uploadMaterialImage(input: {
+    chatId: string;
+    userId: number;
+    empresaId: bigint;
+    payload: WahaMessagePayload;
+    missingMessage: string;
+    invalidMessage: string;
+  }): Promise<string | null> {
+    const media = input.payload.media;
+    if (!input.payload.hasMedia || !media?.url) {
+      await this.deps.messaging.sendText(input.chatId, input.missingMessage);
+      return null;
+    }
+
+    const contentType = media.mimetype ?? "application/octet-stream";
+    if (!contentType.startsWith("image/")) {
+      await this.deps.messaging.sendText(input.chatId, input.invalidMessage);
+      return null;
+    }
+
+    try {
+      const body = await this.deps.mediaDownloader.download(media.url);
+      const objectPath = buildStoragePath({
+        empresaId: input.empresaId,
+        userId: input.userId,
+        messageId: input.payload.id,
+        filename: media.filename,
+        contentType
+      });
+
+      await this.deps.objectStorage.uploadPrivateObject({
+        path: objectPath,
+        body,
+        contentType
+      });
+
+      return objectPath;
+    } catch (error) {
+      console.error("Failed to process WhatsApp material receipt photo", error);
+      await this.deps.messaging.sendText(
+        input.chatId,
+        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+      );
+      return null;
+    }
+  }
+
   private async handleConsulta(
     chatId: string,
     phoneE164: string,
@@ -903,10 +1209,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
   }
 
   private async saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord> {
+    const stepKey = isMaterialFlowStepKey(input.stepKey) ? input.stepKey : input.step;
+
     return this.deps.store.saveState({
       ...input,
       flowKey: this.key,
-      stepKey: input.step,
+      stepKey,
       flowData: buildDiarioFlowData(input)
     });
   }
@@ -942,7 +1250,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 }
 
 function buildDiarioFlowData(input: SaveConversationStateInput): FlowData {
+  const data = flowDataObject(input.flowData);
+
   return {
+    ...data,
     selectedTipo: input.selectedTipo ?? null,
     selectedEmpresaId: input.selectedEmpresaId?.toString() ?? null,
     selectedTipoServico: input.selectedTipoServico ?? null,
@@ -957,7 +1268,7 @@ function buildDiarioFlowData(input: SaveConversationStateInput): FlowData {
 }
 
 function hydrateDiarioState(state: ConversationStateRecord): ConversationStateRecord {
-  const data = state.flowData ?? {};
+  const data = flowDataObject(state.flowData);
 
   return {
     ...state,
@@ -975,6 +1286,26 @@ function hydrateDiarioState(state: ConversationStateRecord): ConversationStateRe
       state.selectedTrainingPhotoCount ?? numberFromData(data.selectedTrainingPhotoCount),
     pendingEntradaId: state.pendingEntradaId ?? bigintFromData(data.pendingEntradaId)
   };
+}
+
+function flowDataObject(value: FlowData | null | undefined): FlowData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value;
+}
+
+function materialAnswerFromData(
+  flowData: FlowData | null | undefined,
+  key: (typeof MATERIAL_FLOW_DATA_KEYS)[keyof typeof MATERIAL_FLOW_DATA_KEYS]
+): MaterialAnswer | null {
+  const value = flowDataObject(flowData)[key];
+  return value === "Sim" || value === "Não" ? value : null;
+}
+
+function buildMaterialDescription(quantidadeCorreta: MaterialAnswer, qualidadeCorreta: MaterialAnswer): string {
+  return `Quantidade correta: ${quantidadeCorreta}\nQualidade correta: ${qualidadeCorreta}`;
 }
 
 function stringFromData(value: unknown): string | null {

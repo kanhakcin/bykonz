@@ -176,19 +176,19 @@ function textWebhook(body: string, chatId = CHAT_ID): WahaWebhook {
   };
 }
 
-function photoWebhook(): WahaWebhook {
+function photoWebhook(id = "photo-1", filename = "foto.jpg"): WahaWebhook {
   return {
     event: "message",
     session: "default",
     payload: {
-      id: "photo-1",
+      id,
       from: CHAT_ID,
       body: "",
       hasMedia: true,
       media: {
-        url: "http://waha.local/api/files/photo-1.jpg",
+        url: `http://waha.local/api/files/${filename}`,
         mimetype: "image/jpeg",
-        filename: "foto.jpg"
+        filename
       }
     }
   };
@@ -748,6 +748,123 @@ describe("ConversationService", () => {
     expect(store.media[0].mediaUrl).toBe(storage.uploads[0].path);
     expect(store.states.has(CHAT_ID)).toBe(false);
     expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+  });
+
+  it("runs the Recebimento de material include flow with OS, note photo, material photo, quantity, and quality", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("3"));
+    await service.handleWebhook(textWebhook("2"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PROCEDURE_NUMBER",
+      stepKey: "AWAITING_MATERIAL_OS",
+      selectedTipo: "Recebimento de material",
+      selectedEmpresaId: 10n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("número da OS");
+    expect(messaging.messages.at(-1)?.text).not.toContain("Escolha o tipo de serviço");
+    expect(messaging.messages.at(-1)?.text).not.toContain("procedimento utilizado");
+
+    await service.handleWebhook(textWebhook("OS-123/2026"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PHOTO",
+      stepKey: "AWAITING_MATERIAL_NOTA_PHOTO",
+      selectedNumeroProcedimento: "OS-123/2026"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("foto da nota");
+
+    await service.handleWebhook(photoWebhook("nota-1", "nota.jpg"));
+
+    expect(store.entradas).toMatchObject([
+      {
+        userId: 7,
+        empresaId: 10n,
+        tipo: "Recebimento de material",
+        tipoServico: null,
+        numeroProcedimento: "OS-123/2026",
+        description: ""
+      }
+    ]);
+    expect(store.media[0]).toMatchObject({
+      entradaId: 1n,
+      mediaUrl: storage.uploads[0].path,
+      mediaTipo: "material_nota"
+    });
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PHOTO",
+      stepKey: "AWAITING_MATERIAL_PHOTO",
+      pendingEntradaId: 1n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("foto do material");
+
+    await service.handleWebhook(photoWebhook("material-1", "material.jpg"));
+
+    expect(storage.uploads).toHaveLength(2);
+    expect(store.media[1]).toMatchObject({
+      entradaId: 1n,
+      mediaUrl: storage.uploads[1].path,
+      mediaTipo: "material_foto"
+    });
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_DESCRIPTION",
+      stepKey: "AWAITING_MATERIAL_QUANTITY"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("quantidade está correta");
+
+    await service.handleWebhook(textWebhook("talvez"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      stepKey: "AWAITING_MATERIAL_QUANTITY"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
+
+    await service.handleWebhook(textWebhook("1"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      stepKey: "AWAITING_MATERIAL_QUALITY",
+      flowData: expect.objectContaining({
+        materialQuantidadeCorreta: "Sim"
+      })
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("qualidade está correta");
+
+    await service.handleWebhook(textWebhook("não"));
+
+    expect(store.entradas[0]).toMatchObject({
+      description: "Quantidade correta: Sim\nQualidade correta: Não"
+    });
+    expect(store.states.has(CHAT_ID)).toBe(false);
+    expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+  });
+
+  it("rejects non-image files for both Recebimento de material photos", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("3"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("OS-124/2026"));
+    await service.handleWebhook(fileWebhook());
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      stepKey: "AWAITING_MATERIAL_NOTA_PHOTO"
+    });
+    expect(store.entradas).toHaveLength(0);
+    expect(messaging.messages.at(-1)?.text).toContain("O arquivo precisa ser uma imagem");
+
+    await service.handleWebhook(photoWebhook("nota-2", "nota-2.jpg"));
+    await service.handleWebhook(fileWebhook());
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      stepKey: "AWAITING_MATERIAL_PHOTO"
+    });
+    expect(store.media).toHaveLength(1);
+    expect(messaging.messages.at(-1)?.text).toContain("O arquivo precisa ser uma imagem");
   });
 
   it("re-shows the service type menu after an invalid service option", async () => {

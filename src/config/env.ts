@@ -4,7 +4,6 @@ export interface AppConfig {
   nodeEnv: string;
   port: number;
   databaseUrl: string;
-  directUrl: string;
   s3Endpoint: string;
   s3Region: string;
   s3AccessKeyId: string;
@@ -18,7 +17,6 @@ export interface AppConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const required = [
     "DATABASE_URL",
-    "DIRECT_URL",
     "ENDPOINT",
     "REGION",
     "ACCESS_KEY_ID",
@@ -43,7 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv: env.NODE_ENV ?? "development",
     port,
     databaseUrl: env.DATABASE_URL!,
-    directUrl: env.DIRECT_URL!,
     s3Endpoint: normalizeUrlOriginAndPath(env.ENDPOINT!, "ENDPOINT"),
     s3Region: env.REGION!,
     s3AccessKeyId: env.ACCESS_KEY_ID!,

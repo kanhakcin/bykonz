@@ -13,7 +13,6 @@ describe("env config", () => {
   it("loads S3 storage config", () => {
     const config = loadConfig({
       DATABASE_URL: "postgresql://user:pass@example.com:5432/postgres",
-      DIRECT_URL: "postgresql://user:pass@example.com:5432/postgres",
       ENDPOINT: "https://project-ref.storage.supabase.co/storage/v1/s3/",
       REGION: "sa-east-1",
       ACCESS_KEY_ID: "access-key",

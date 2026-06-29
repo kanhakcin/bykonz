@@ -6,15 +6,14 @@ interface S3Sender {
   send(command: PutObjectCommand | GetObjectCommand): Promise<unknown>;
 }
 
-export class SupabaseObjectStorage implements ObjectStorage {
+export class S3ObjectStorage implements ObjectStorage {
   constructor(
     private readonly client: S3Sender,
     private readonly bucket: string
   ) {}
 
-  static fromConfig(config: AppConfig): SupabaseObjectStorage {
+  static fromConfig(config: AppConfig): S3ObjectStorage {
     const client = new S3Client({
-      forcePathStyle: true,
       region: config.s3Region,
       endpoint: config.s3Endpoint,
       credentials: {
@@ -23,7 +22,7 @@ export class SupabaseObjectStorage implements ObjectStorage {
       }
     });
 
-    return new SupabaseObjectStorage(client, config.supabaseStorageBucket);
+    return new S3ObjectStorage(client, config.s3Bucket);
   }
 
   async uploadPrivateObject(input: {
@@ -41,7 +40,7 @@ export class SupabaseObjectStorage implements ObjectStorage {
         })
       );
     } catch (error) {
-      throw new Error(`Supabase S3 upload failed: ${formatStorageError(error)}`);
+      throw new Error(`S3 upload failed: ${formatStorageError(error)}`);
     }
   }
 
@@ -55,12 +54,12 @@ export class SupabaseObjectStorage implements ObjectStorage {
         })
       );
     } catch (error) {
-      throw new Error(`Supabase S3 download failed: ${formatStorageError(error)}`);
+      throw new Error(`S3 download failed: ${formatStorageError(error)}`);
     }
 
     const body = (response as { Body?: unknown }).Body;
     if (!body) {
-      throw new Error(`Supabase S3 download returned empty body for key: ${path}`);
+      throw new Error(`S3 download returned empty body for key: ${path}`);
     }
 
     const chunks: Buffer[] = [];

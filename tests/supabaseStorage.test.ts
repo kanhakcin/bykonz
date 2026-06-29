@@ -1,11 +1,11 @@
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
-import { SupabaseObjectStorage } from "../src/lib/supabaseStorage";
+import { S3ObjectStorage } from "../src/lib/s3Storage";
 
-describe("SupabaseObjectStorage", () => {
+describe("S3ObjectStorage", () => {
   it("uploads objects with S3 PutObjectCommand", async () => {
     const sent: Array<PutObjectCommand | GetObjectCommand> = [];
-    const storage = new SupabaseObjectStorage(
+    const storage = new S3ObjectStorage(
       {
         send: async (command: PutObjectCommand | GetObjectCommand) => {
           sent.push(command);
@@ -34,7 +34,7 @@ describe("SupabaseObjectStorage", () => {
     const imageData = Buffer.from("image-bytes");
     const sent: Array<PutObjectCommand | GetObjectCommand> = [];
 
-    const storage = new SupabaseObjectStorage(
+    const storage = new S3ObjectStorage(
       {
         send: async (command: PutObjectCommand | GetObjectCommand) => {
           sent.push(command);
@@ -62,7 +62,7 @@ describe("SupabaseObjectStorage", () => {
   });
 
   it("throws when download returns no body", async () => {
-    const storage = new SupabaseObjectStorage(
+    const storage = new S3ObjectStorage(
       {
         send: async () => ({ Body: undefined })
       },

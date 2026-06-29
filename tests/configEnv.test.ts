@@ -17,7 +17,7 @@ describe("env config", () => {
       REGION: "sa-east-1",
       ACCESS_KEY_ID: "access-key",
       SECRET_ACCESS_KEY: "secret-key",
-      SUPABASE_STORAGE_BUCKET: "tatacon",
+      S3_BUCKET: "tatacon",
       WAHA_BASE_URL: "http://localhost:3000/",
       WAHA_API_KEY: "waha-key",
       WAHA_SESSION: "default"

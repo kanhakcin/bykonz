@@ -8,7 +8,7 @@ export interface AppConfig {
   s3Region: string;
   s3AccessKeyId: string;
   s3SecretAccessKey: string;
-  supabaseStorageBucket: string;
+  s3Bucket: string;
   wahaBaseUrl: string;
   wahaApiKey: string;
   wahaSession: string;
@@ -21,7 +21,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     "REGION",
     "ACCESS_KEY_ID",
     "SECRET_ACCESS_KEY",
-    "SUPABASE_STORAGE_BUCKET",
+    "S3_BUCKET",
     "WAHA_BASE_URL",
     "WAHA_API_KEY",
     "WAHA_SESSION"
@@ -45,7 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     s3Region: env.REGION!,
     s3AccessKeyId: env.ACCESS_KEY_ID!,
     s3SecretAccessKey: env.SECRET_ACCESS_KEY!,
-    supabaseStorageBucket: env.SUPABASE_STORAGE_BUCKET!,
+    s3Bucket: env.S3_BUCKET!,
     wahaBaseUrl: env.WAHA_BASE_URL!.replace(/\/+$/, ""),
     wahaApiKey: env.WAHA_API_KEY!,
     wahaSession: env.WAHA_SESSION!

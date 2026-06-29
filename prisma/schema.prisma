@@ -110,6 +110,9 @@ model WhatsappConversationState {
   chatId                           String           @unique @map("ChatId")
   phoneE164                        String           @map("PhoneE164")
   step                             ConversationStep @map("Step")
+  flowKey                          String?          @map("FlowKey")
+  stepKey                          String?          @map("StepKey")
+  flowData                         Json?            @map("FlowData")
   selectedTipo                     String?          @map("SelectedTipo")
   selectedEmpresaId                BigInt?          @map("SelectedEmpresaId") @db.BigInt
   selectedTipoServico              String?          @map("SelectedTipoServico")

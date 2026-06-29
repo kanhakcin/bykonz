@@ -459,8 +459,14 @@ describe("ConversationService", () => {
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_TRAINING_TEMA",
+      flowKey: "diario-das-obras",
+      stepKey: "AWAITING_TRAINING_TEMA",
       selectedTipo: "Treinamento",
-      selectedEmpresaId: 10n
+      selectedEmpresaId: 10n,
+      flowData: expect.objectContaining({
+        selectedTipo: "Treinamento",
+        selectedEmpresaId: "10"
+      })
     });
     expect(messaging.messages).toHaveLength(1);
     expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
@@ -475,12 +481,58 @@ describe("ConversationService", () => {
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_REPORT_DATE",
+      flowKey: "diario-das-obras",
+      stepKey: "AWAITING_REPORT_DATE",
       selectedTipo: "Inspecao de servico",
-      selectedEmpresaId: 10n
+      selectedEmpresaId: 10n,
+      flowData: expect.objectContaining({
+        selectedTipo: "Inspecao de servico",
+        selectedEmpresaId: "10"
+      })
     });
     expect(messaging.messages).toHaveLength(1);
     expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
     expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
+  });
+
+  it("resumes DiarioDasObras using generic flowKey, stepKey, and flowData", async () => {
+    const { service, store, messaging } = createHarness();
+    store.states.set(CHAT_ID, {
+      chatId: CHAT_ID,
+      phoneE164: PHONE,
+      step: "MAIN_MENU",
+      flowKey: "diario-das-obras",
+      stepKey: "AWAITING_TRAINING_TEMA",
+      flowData: {
+        selectedTipo: "Treinamento",
+        selectedEmpresaId: "10"
+      },
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+
+    await service.handleWebhook(textWebhook("NR-18 Canteiro de obras"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_TRAINING_PARTICIPANTS",
+      flowKey: "diario-das-obras",
+      stepKey: "AWAITING_TRAINING_PARTICIPANTS",
+      selectedTreinamentoTema: "NR-18 Canteiro de obras",
+      flowData: expect.objectContaining({
+        selectedTipo: "Treinamento",
+        selectedEmpresaId: "10",
+        selectedTreinamentoTema: "NR-18 Canteiro de obras"
+      })
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("nomes e CPFs");
   });
 
   it("runs the Treinamento flow with tema, participants, dates, photos, and file upload", async () => {

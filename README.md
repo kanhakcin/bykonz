@@ -70,6 +70,10 @@ Prisma types generated from the checked-in schema.
 
 ## Flow
 
+The active WhatsApp workflow is implemented as the modular
+`DiarioDasObras` flow under `src/flows/DiarioDasObras`. `ConversationService`
+handles WAHA/user/state plumbing and delegates conversation steps to that flow.
+
 - First message: replies with seven options:
   `Inspecao de servico`, `Abrir nao conformidade`, `Recebimento de material`,
   `Plano de manutencao`, `Programa sol`, `Treinamento`, and

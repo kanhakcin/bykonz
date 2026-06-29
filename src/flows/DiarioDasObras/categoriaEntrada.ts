@@ -1,0 +1,48 @@
+import type { EmpresaRecord } from "../types";
+import type { EntryTipo } from "./types";
+
+export const TIPO_SERVICOS = [
+  "Alvenaria",
+  "Hidráulica",
+  "Elétrica",
+  "Organização e Limpeza",
+  "Segurança",
+  "Concretagem",
+  "Outros"
+] as const;
+
+export type TipoServico = (typeof TIPO_SERVICOS)[number];
+
+export const TIPO_SERVICO_OPTIONS: Record<string, TipoServico> = {
+  "1": "Alvenaria",
+  "2": "Hidráulica",
+  "3": "Elétrica",
+  "4": "Organização e Limpeza",
+  "5": "Segurança",
+  "6": "Concretagem",
+  "7": "Outros"
+};
+
+export function isTipoServico(value: string | null | undefined): value is TipoServico {
+  return typeof value === "string" && (TIPO_SERVICOS as readonly string[]).includes(value);
+}
+
+export function tipoServicoMenuText(tipo: EntryTipo): string {
+  const options = TIPO_SERVICOS.map((tipoServico, index) => `${index + 1}) ${tipoServico}`).join("\n");
+  return `${tipo}\nEscolha o tipo de serviço:\n${options}\n\nDigite 0 para voltar ao menu.`;
+}
+
+export function numeroProcedimentoPromptText(): string {
+  return "Informe o número do procedimento utilizado.";
+}
+
+export function photoPromptText(
+  tipo: EntryTipo,
+  empresa: EmpresaRecord,
+  tipoServico: TipoServico,
+  numeroProcedimento: string
+): string {
+  const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
+  return `${tipo} - ${empresaNome}\nTipo de serviço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\nEnvie uma foto para incluir no registro.`;
+}
+

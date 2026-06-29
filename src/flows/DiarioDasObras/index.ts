@@ -1,0 +1,1116 @@
+import type { WahaMessagePayload } from "../../types/waha";
+import type {
+  ConversationServiceDeps,
+  ConversationStateRecord,
+  EmpresaRecord,
+  FlowData,
+  FlowDefinition,
+  FlowHandleInput,
+  FlowStep,
+  SaveConversationStateInput
+} from "../types";
+import {
+  isTipoServico,
+  numeroProcedimentoPromptText,
+  photoPromptText,
+  tipoServicoMenuText,
+  TIPO_SERVICO_OPTIONS
+} from "./categoriaEntrada";
+import { DIARIO_OBRA_REPORT_OPTION, DIARIO_OBRA_REPORT_TIPO } from "./gerarDiarioObra";
+import { usesIncludeOnlyActionMenu } from "./inspecaoServico";
+import {
+  ACTION_OPTIONS,
+  actionMenuText,
+  INCLUDE_ONLY_ACTION_OPTIONS,
+  isEntryTipo,
+  isMainMenuSelection,
+  mainMenuText,
+  TIPO_OPTIONS
+} from "./menu";
+import {
+  TRAINING_MEDIA_TYPES,
+  TRAINING_PHOTO_DONE_COMMANDS,
+  type TrainingMediaType,
+  trainingDatesPromptText,
+  trainingFilePromptText,
+  trainingParticipantsPromptText,
+  trainingPhotoPromptText,
+  trainingTemaPromptText
+} from "./treinamento";
+import { DIARIO_DAS_OBRAS_FLOW_KEY, type EntryTipo } from "./types";
+
+export class DiarioDasObrasFlow implements FlowDefinition {
+  readonly key = DIARIO_DAS_OBRAS_FLOW_KEY;
+
+  constructor(private readonly deps: ConversationServiceDeps) {}
+
+  async resetToMenu(chatId: string, phoneE164: string): Promise<void> {
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "MAIN_MENU",
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, mainMenuText());
+  }
+
+  async start(input: FlowHandleInput): Promise<void> {
+    if (!isMainMenuSelection(input.text)) {
+      await this.deps.messaging.sendText(input.chatId, mainMenuText());
+      return;
+    }
+
+    await this.handle(input);
+  }
+
+  async handle(input: FlowHandleInput): Promise<void> {
+    const state = hydrateDiarioState(input.state);
+
+    switch (state.stepKey ?? state.step) {
+      case "MAIN_MENU":
+        await this.handleMainMenu(input.chatId, input.phoneE164, input.user.id, input.text);
+        return;
+      case "ACTION_MENU":
+        await this.handleActionMenu(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        return;
+      case "SELECT_EMPRESA":
+        await this.handleEmpresaSelection(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        return;
+      case "AWAITING_SERVICE_TYPE":
+        await this.handleServiceType(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case "AWAITING_PROCEDURE_NUMBER":
+        await this.handleProcedureNumber(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        return;
+      case "AWAITING_PHOTO":
+        await this.handlePhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
+        return;
+      case "AWAITING_DESCRIPTION":
+        await this.handleDescription(input.chatId, state, input.text);
+        return;
+      case "AWAITING_INSPECT_DATE":
+        await this.resetToMenu(input.chatId, input.phoneE164);
+        return;
+      case "SELECT_EMPRESA_FOR_REPORT":
+        await this.handleEmpresaSelectionForReport(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        return;
+      case "AWAITING_REPORT_DATE":
+        await this.handleReportDate(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case "SELECT_EMPRESA_FOR_TRAINING":
+        await this.handleEmpresaSelectionForTraining(input.chatId, input.phoneE164, input.user.id, input.text);
+        return;
+      case "AWAITING_TRAINING_TEMA":
+        await this.handleTrainingTema(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case "AWAITING_TRAINING_PARTICIPANTS":
+        await this.handleTrainingParticipants(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case "AWAITING_TRAINING_DATES":
+        await this.handleTrainingDates(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        return;
+      case "AWAITING_TRAINING_PHOTO":
+        await this.handleTrainingPhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
+        return;
+      case "AWAITING_TRAINING_FILE":
+        await this.handleTrainingFile(input.chatId, input.phoneE164, input.user.id, state, input.payload);
+        return;
+      default:
+        await this.resetToMenu(input.chatId, input.phoneE164);
+    }
+  }
+
+  private async handleMainMenu(chatId: string, phoneE164: string, userId: number, text: string): Promise<void> {
+    if (text === DIARIO_OBRA_REPORT_OPTION) {
+      await this.handleConsultaForTipo(chatId, phoneE164, userId, DIARIO_OBRA_REPORT_TIPO);
+      return;
+    }
+
+    const tipo = TIPO_OPTIONS[text];
+    if (!tipo) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${mainMenuText()}`);
+      return;
+    }
+
+    if (tipo === "Treinamento") {
+      await this.resolveEmpresaForTraining(chatId, phoneE164, userId);
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "ACTION_MENU",
+      selectedTipo: tipo,
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+
+    await this.deps.messaging.sendText(chatId, actionMenuText(tipo));
+  }
+
+  private async handleActionMenu(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    if (usesIncludeOnlyActionMenu(tipo)) {
+      if (text === INCLUDE_ONLY_ACTION_OPTIONS.incluir) {
+        await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
+        return;
+      }
+
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+      return;
+    }
+
+    if (text === ACTION_OPTIONS.consulta) {
+      await this.handleConsulta(chatId, phoneE164, userId, state);
+      return;
+    }
+
+    if (text === ACTION_OPTIONS.incluir) {
+      await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
+      return;
+    }
+
+    await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+  }
+
+  private async resolveEmpresaForAdd(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    tipo: EntryTipo
+  ): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    if (empresas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (empresas.length === 1) {
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_SERVICE_TYPE",
+        selectedTipo: tipo,
+        selectedEmpresaId: empresas[0].id,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
+        pendingEntradaId: null
+      });
+      await this.deps.messaging.sendText(chatId, tipoServicoMenuText(tipo));
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA",
+      selectedTipo: tipo,
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+  }
+
+  private async handleEmpresaSelection(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    const selectedIndex = Number(text) - 1;
+    const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
+    if (!empresa) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_SERVICE_TYPE",
+      selectedTipo: tipo,
+      selectedEmpresaId: empresa.id,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, tipoServicoMenuText(tipo));
+  }
+
+  private async resolveEmpresaForTraining(chatId: string, phoneE164: string, userId: number): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    if (empresas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (empresas.length === 1) {
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_TRAINING_TEMA",
+        selectedTipo: "Treinamento",
+        selectedEmpresaId: empresas[0].id,
+        selectedTipoServico: null,
+        selectedNumeroProcedimento: null,
+        selectedTreinamentoTema: null,
+        selectedTreinamentoParticipantes: null,
+        selectedTreinamentoInicio: null,
+        selectedTreinamentoFim: null,
+        selectedTrainingPhotoCount: null,
+        pendingEntradaId: null
+      });
+      await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA_FOR_TRAINING",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+  }
+
+  private async handleEmpresaSelectionForTraining(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    text: string
+  ): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    const selectedIndex = Number(text) - 1;
+    const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
+    if (!empresa) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_TEMA",
+      selectedTipo: "Treinamento",
+      selectedEmpresaId: empresa.id,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+  }
+
+  private async handleTrainingTema(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const tema = text.trim();
+    if (!tema) {
+      await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+      return;
+    }
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_PARTICIPANTS",
+      selectedTreinamentoTema: tema
+    });
+    await this.deps.messaging.sendText(chatId, trainingParticipantsPromptText());
+  }
+
+  private async handleTrainingParticipants(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId || !state.selectedTreinamentoTema) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const participantes = text.trim();
+    if (!participantes) {
+      await this.deps.messaging.sendText(chatId, trainingParticipantsPromptText());
+      return;
+    }
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_DATES",
+      selectedTreinamentoParticipantes: participantes
+    });
+    await this.deps.messaging.sendText(chatId, trainingDatesPromptText());
+  }
+
+  private async handleTrainingDates(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    if (
+      state.selectedTipo !== "Treinamento" ||
+      !state.selectedEmpresaId ||
+      !state.selectedTreinamentoTema ||
+      !state.selectedTreinamentoParticipantes
+    ) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const dateRange = parseTrainingDateRange(text);
+    if (!dateRange) {
+      await this.deps.messaging.sendText(chatId, `Data/hora invalida.\n\n${trainingDatesPromptText()}`);
+      return;
+    }
+
+    const treinamento = await this.deps.store.createTreinamento({
+      userId,
+      empresaId: state.selectedEmpresaId,
+      tema: state.selectedTreinamentoTema,
+      participantes: state.selectedTreinamentoParticipantes,
+      inicio: dateRange.inicio,
+      fim: dateRange.fim
+    });
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_TRAINING_PHOTO",
+      selectedTreinamentoInicio: dateRange.inicio,
+      selectedTreinamentoFim: dateRange.fim,
+      selectedTrainingPhotoCount: 0,
+      pendingEntradaId: treinamento.entradaId
+    });
+    await this.deps.messaging.sendText(chatId, trainingPhotoPromptText());
+  }
+
+  private async handleTrainingPhoto(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    if (!state.selectedEmpresaId || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const text = (payload.body ?? "").trim().toLowerCase();
+    const photoCount = state.selectedTrainingPhotoCount ?? 0;
+    if (TRAINING_PHOTO_DONE_COMMANDS.has(text)) {
+      if (photoCount === 0) {
+        await this.deps.messaging.sendText(chatId, "Envie pelo menos uma foto do treinamento para continuar.");
+        return;
+      }
+
+      await this.saveState({
+        ...state,
+        chatId,
+        phoneE164,
+        step: "AWAITING_TRAINING_FILE"
+      });
+      await this.deps.messaging.sendText(chatId, trainingFilePromptText());
+      return;
+    }
+
+    const uploaded = await this.handleTrainingMediaUpload({
+      chatId,
+      userId,
+      state,
+      payload,
+      mediaTipo: TRAINING_MEDIA_TYPES.photo,
+      allowedKinds: "image",
+      missingMessage: "Envie uma foto do treinamento para continuar.",
+      invalidMessage: "O arquivo precisa ser uma imagem. Envie uma foto do treinamento."
+    });
+    if (!uploaded) {
+      return;
+    }
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      selectedTrainingPhotoCount: photoCount + 1
+    });
+    await this.deps.messaging.sendText(chatId, "Foto recebida. Envie outra foto ou digite OK para continuar.");
+  }
+
+  private async handleTrainingFile(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    if (!state.selectedEmpresaId || !state.pendingEntradaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const uploaded = await this.handleTrainingMediaUpload({
+      chatId,
+      userId,
+      state,
+      payload,
+      mediaTipo: TRAINING_MEDIA_TYPES.file,
+      allowedKinds: "image-or-pdf",
+      missingMessage: "Envie o arquivo do treinamento em PDF ou foto.",
+      invalidMessage: "O arquivo precisa ser PDF ou imagem. Envie novamente."
+    });
+    if (!uploaded) {
+      return;
+    }
+
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, "Treinamento salvo com sucesso.");
+  }
+
+  private async handleTrainingMediaUpload(input: {
+    chatId: string;
+    userId: number;
+    state: ConversationStateRecord;
+    payload: WahaMessagePayload;
+    mediaTipo: TrainingMediaType;
+    allowedKinds: "image" | "image-or-pdf";
+    missingMessage: string;
+    invalidMessage: string;
+  }): Promise<boolean> {
+    const media = input.payload.media;
+    if (!input.payload.hasMedia || !media?.url) {
+      await this.deps.messaging.sendText(input.chatId, input.missingMessage);
+      return false;
+    }
+
+    const contentType = media.mimetype ?? "application/octet-stream";
+    const isImage = contentType.startsWith("image/");
+    const isPdf = contentType === "application/pdf";
+    if (!isImage && (input.allowedKinds !== "image-or-pdf" || !isPdf)) {
+      await this.deps.messaging.sendText(input.chatId, input.invalidMessage);
+      return false;
+    }
+
+    try {
+      const body = await this.deps.mediaDownloader.download(media.url);
+      const objectPath = buildStoragePath({
+        empresaId: input.state.selectedEmpresaId!,
+        userId: input.userId,
+        messageId: input.payload.id,
+        filename: media.filename,
+        contentType
+      });
+
+      await this.deps.objectStorage.uploadPrivateObject({
+        path: objectPath,
+        body,
+        contentType
+      });
+
+      await this.deps.store.addEntradaMedia({
+        entradaId: input.state.pendingEntradaId!,
+        mediaUrl: objectPath,
+        mediaTipo: input.mediaTipo
+      });
+
+      return true;
+    } catch (error) {
+      console.error("Failed to process WhatsApp training media", error);
+      await this.deps.messaging.sendText(
+        input.chatId,
+        "Nao consegui processar o arquivo. Tente enviar novamente em alguns instantes."
+      );
+      return false;
+    }
+  }
+
+  private async handleServiceType(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const tipoServico = TIPO_SERVICO_OPTIONS[text];
+    if (!tipoServico) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${tipoServicoMenuText(tipo)}`);
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_PROCEDURE_NUMBER",
+      selectedTipo: tipo,
+      selectedEmpresaId: state.selectedEmpresaId,
+      selectedTipoServico: tipoServico,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+
+    await this.deps.messaging.sendText(chatId, numeroProcedimentoPromptText());
+  }
+
+  private async handleProcedureNumber(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    const tipoServico = this.requireSelectedTipoServico(state);
+    if (!tipo || !state.selectedEmpresaId || !tipoServico) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const numeroProcedimento = text.trim();
+    if (!numeroProcedimento) {
+      await this.deps.messaging.sendText(chatId, numeroProcedimentoPromptText());
+      return;
+    }
+
+    const empresa = await this.findSelectedEmpresaForUser(userId, state.selectedEmpresaId);
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_PHOTO",
+      selectedTipo: tipo,
+      selectedEmpresaId: state.selectedEmpresaId,
+      selectedTipoServico: tipoServico,
+      selectedNumeroProcedimento: numeroProcedimento,
+      pendingEntradaId: null
+    });
+
+    await this.deps.messaging.sendText(
+      chatId,
+      photoPromptText(tipo, empresa, tipoServico, numeroProcedimento)
+    );
+  }
+
+  private async handlePhoto(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    payload: WahaMessagePayload
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    const tipoServico = this.requireSelectedTipoServico(state);
+    const numeroProcedimento = state.selectedNumeroProcedimento?.trim();
+    if (!tipo || !state.selectedEmpresaId || !tipoServico || !numeroProcedimento) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const media = payload.media;
+    if (!payload.hasMedia || !media?.url) {
+      await this.deps.messaging.sendText(chatId, "Envie uma foto para continuar.");
+      return;
+    }
+
+    const contentType = media.mimetype ?? "application/octet-stream";
+    if (!contentType.startsWith("image/")) {
+      await this.deps.messaging.sendText(chatId, "O arquivo precisa ser uma imagem. Envie uma foto para continuar.");
+      return;
+    }
+
+    try {
+      const body = await this.deps.mediaDownloader.download(media.url);
+      const objectPath = buildStoragePath({
+        empresaId: state.selectedEmpresaId,
+        userId,
+        messageId: payload.id,
+        filename: media.filename,
+        contentType
+      });
+
+      await this.deps.objectStorage.uploadPrivateObject({
+        path: objectPath,
+        body,
+        contentType
+      });
+
+      const entrada = await this.deps.store.createEntrada({
+        userId,
+        empresaId: state.selectedEmpresaId,
+        tipo,
+        tipoServico,
+        numeroProcedimento,
+        description: ""
+      });
+
+      await this.deps.store.addEntradaMedia({
+        entradaId: entrada.id,
+        mediaUrl: objectPath
+      });
+
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_DESCRIPTION",
+        selectedTipo: tipo,
+        selectedEmpresaId: state.selectedEmpresaId,
+        selectedTipoServico: tipoServico,
+        selectedNumeroProcedimento: numeroProcedimento,
+        pendingEntradaId: entrada.id
+      });
+
+      await this.deps.messaging.sendText(chatId, "Foto recebida. Agora envie a descricao.");
+    } catch (error) {
+      console.error("Failed to process WhatsApp photo", error);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+      );
+    }
+  }
+
+  private async handleDescription(chatId: string, state: ConversationStateRecord, text: string): Promise<void> {
+    if (!state.pendingEntradaId) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(chatId, mainMenuText());
+      return;
+    }
+
+    if (!text) {
+      await this.deps.messaging.sendText(chatId, "Envie uma descricao em texto para concluir.");
+      return;
+    }
+
+    await this.deps.store.updateEntradaDescription(state.pendingEntradaId, text);
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
+  }
+
+  private async handleConsulta(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    await this.handleConsultaForTipo(chatId, phoneE164, userId, tipo);
+  }
+
+  private async handleConsultaForTipo(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    tipo: EntryTipo
+  ): Promise<void> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    if (empresas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (empresas.length === 1) {
+      await this.saveState({
+        chatId,
+        phoneE164,
+        step: "AWAITING_REPORT_DATE",
+        selectedTipo: tipo,
+        selectedEmpresaId: empresas[0].id,
+        pendingEntradaId: null
+      });
+      await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA_FOR_REPORT",
+      selectedTipo: tipo,
+      selectedEmpresaId: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+  }
+
+  private async handleEmpresaSelectionForReport(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    const selectedIndex = Number(text) - 1;
+    const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
+    if (!empresa) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "AWAITING_REPORT_DATE",
+      selectedTipo: tipo,
+      selectedEmpresaId: empresa.id,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+  }
+
+  private async handleReportDate(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo || !state.selectedEmpresaId) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const dateRange = parseReportDate(text);
+    if (!dateRange) {
+      await this.deps.messaging.sendText(chatId, "Data invalida. Informe a data no formato DD/MM/AAAA.");
+      return;
+    }
+
+    await this.deps.messaging.sendText(chatId, "Gerando relatorio, aguarde...");
+
+    const entradas = await this.deps.store.findEntradasForReport({
+      empresaId: state.selectedEmpresaId,
+      tipo,
+      dateStart: dateRange.start,
+      dateEnd: dateRange.end
+    });
+
+    if (entradas.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(
+        chatId,
+        `Nenhum registro encontrado para ${text}.\n\n${mainMenuText()}`
+      );
+      return;
+    }
+
+    const empresaNome = entradas[0].empresaNome ?? `Empresa ${state.selectedEmpresaId.toString()}`;
+    const pdfBuffer = await this.deps.pdfGenerator.generateReport({
+      categoria: tipo,
+      empresaNome,
+      reportDate: text,
+      generatedAt: new Date(),
+      entradas
+    });
+
+    const filename = `relatorio-${tipo.replace(/\s+/g, "-").toLowerCase()}-${text.replace(/\//g, "-")}.pdf`;
+    await this.deps.messaging.sendFile(chatId, {
+      mimetype: "application/pdf",
+      filename,
+      data: pdfBuffer.toString("base64")
+    });
+
+    await this.deps.store.clearState(chatId);
+    await this.deps.messaging.sendText(chatId, mainMenuText());
+  }
+
+  private async saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord> {
+    return this.deps.store.saveState({
+      ...input,
+      flowKey: this.key,
+      stepKey: input.step,
+      flowData: buildDiarioFlowData(input)
+    });
+  }
+
+  private async findSelectedEmpresaForUser(userId: number, empresaId: bigint): Promise<EmpresaRecord> {
+    const empresas = await this.deps.store.findEmpresasByUser(userId);
+    return empresas.find((empresa) => empresa.id === empresaId) ?? { id: empresaId, nome: null };
+  }
+
+  private requireSelectedTipo(state: ConversationStateRecord): EntryTipo | null {
+    if (isEntryTipo(state.selectedTipo)) {
+      return state.selectedTipo;
+    }
+
+    return null;
+  }
+
+  private requireSelectedTipoServico(state: ConversationStateRecord) {
+    if (isTipoServico(state.selectedTipoServico)) {
+      return state.selectedTipoServico;
+    }
+
+    return null;
+  }
+
+  private empresaMenuText(empresas: EmpresaRecord[]): string {
+    const options = empresas
+      .map((empresa, index) => `${index + 1}) ${empresa.nome ?? `Empresa ${empresa.id.toString()}`}`)
+      .join("\n");
+
+    return `Escolha a empresa:\n${options}\n\nDigite 0 para voltar ao menu.`;
+  }
+}
+
+function buildDiarioFlowData(input: SaveConversationStateInput): FlowData {
+  return {
+    selectedTipo: input.selectedTipo ?? null,
+    selectedEmpresaId: input.selectedEmpresaId?.toString() ?? null,
+    selectedTipoServico: input.selectedTipoServico ?? null,
+    selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
+    selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
+    selectedTreinamentoParticipantes: input.selectedTreinamentoParticipantes ?? null,
+    selectedTreinamentoInicio: input.selectedTreinamentoInicio?.toISOString() ?? null,
+    selectedTreinamentoFim: input.selectedTreinamentoFim?.toISOString() ?? null,
+    selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
+    pendingEntradaId: input.pendingEntradaId?.toString() ?? null
+  };
+}
+
+function hydrateDiarioState(state: ConversationStateRecord): ConversationStateRecord {
+  const data = state.flowData ?? {};
+
+  return {
+    ...state,
+    selectedTipo: state.selectedTipo ?? stringFromData(data.selectedTipo),
+    selectedEmpresaId: state.selectedEmpresaId ?? bigintFromData(data.selectedEmpresaId),
+    selectedTipoServico: state.selectedTipoServico ?? stringFromData(data.selectedTipoServico),
+    selectedNumeroProcedimento:
+      state.selectedNumeroProcedimento ?? stringFromData(data.selectedNumeroProcedimento),
+    selectedTreinamentoTema: state.selectedTreinamentoTema ?? stringFromData(data.selectedTreinamentoTema),
+    selectedTreinamentoParticipantes:
+      state.selectedTreinamentoParticipantes ?? stringFromData(data.selectedTreinamentoParticipantes),
+    selectedTreinamentoInicio: state.selectedTreinamentoInicio ?? dateFromData(data.selectedTreinamentoInicio),
+    selectedTreinamentoFim: state.selectedTreinamentoFim ?? dateFromData(data.selectedTreinamentoFim),
+    selectedTrainingPhotoCount:
+      state.selectedTrainingPhotoCount ?? numberFromData(data.selectedTrainingPhotoCount),
+    pendingEntradaId: state.pendingEntradaId ?? bigintFromData(data.pendingEntradaId)
+  };
+}
+
+function stringFromData(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function numberFromData(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function bigintFromData(value: unknown): bigint | null {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) {
+    return null;
+  }
+
+  return BigInt(value);
+}
+
+function dateFromData(value: unknown): Date | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseReportDate(text: string): { start: Date; end: Date } | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+
+  if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2000 || year > 2100) {
+    return null;
+  }
+
+  const startUtc = new Date(Date.UTC(year, month - 1, day, 3, 0, 0, 0));
+
+  if (
+    startUtc.getUTCFullYear() !== year ||
+    startUtc.getUTCMonth() !== month - 1 ||
+    startUtc.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const endUtc = new Date(Date.UTC(year, month - 1, day + 1, 3, 0, 0, 0));
+
+  return { start: startUtc, end: endUtc };
+}
+
+function parseTrainingDateRange(text: string): { inicio: Date; fim: Date } | null {
+  const matches = [...text.matchAll(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/g)];
+  if (matches.length !== 2) {
+    return null;
+  }
+
+  const inicio = parseSaoPauloDateTime(matches[0]);
+  const fim = parseSaoPauloDateTime(matches[1]);
+  if (!inicio || !fim || fim.getTime() <= inicio.getTime()) {
+    return null;
+  }
+
+  return { inicio, fim };
+}
+
+function parseSaoPauloDateTime(match: RegExpMatchArray): Date | null {
+  const day = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  const hour = parseInt(match[4], 10);
+  const minute = parseInt(match[5], 10);
+
+  if (
+    day < 1 ||
+    day > 31 ||
+    month < 1 ||
+    month > 12 ||
+    year < 2000 ||
+    year > 2100 ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+
+  const localCalendar = new Date(Date.UTC(year, month - 1, day, hour, minute, 0, 0));
+  if (
+    localCalendar.getUTCFullYear() !== year ||
+    localCalendar.getUTCMonth() !== month - 1 ||
+    localCalendar.getUTCDate() !== day ||
+    localCalendar.getUTCHours() !== hour ||
+    localCalendar.getUTCMinutes() !== minute
+  ) {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, month - 1, day, hour + 3, minute, 0, 0));
+}
+
+function buildStoragePath(input: {
+  empresaId: bigint;
+  userId: number;
+  messageId?: string;
+  filename?: string | null;
+  contentType: string;
+}): string {
+  const date = new Date().toISOString().slice(0, 10);
+  const extension = extensionFrom(input.filename, input.contentType);
+  const messageId = input.messageId ?? `${Date.now()}`;
+  const safeMessageId = messageId.replace(/[^a-zA-Z0-9_.-]/g, "_");
+
+  return `entradas/${input.empresaId.toString()}/${input.userId}/${date}/${safeMessageId}.${extension}`;
+}
+
+function extensionFrom(filename: string | null | undefined, contentType: string): string {
+  const filenameExtension = filename?.split(".").pop();
+  if (filenameExtension && /^[a-zA-Z0-9]+$/.test(filenameExtension)) {
+    return filenameExtension.toLowerCase();
+  }
+
+  switch (contentType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "application/pdf":
+      return "pdf";
+    default:
+      return "bin";
+  }
+}

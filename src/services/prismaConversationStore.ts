@@ -1,4 +1,4 @@
-import type { ConversationStep as PrismaConversationStep, PrismaClient } from "@prisma/client";
+import type { ConversationStep as PrismaConversationStep, Prisma, PrismaClient } from "@prisma/client";
 import type {
   ConversationStateRecord,
   ConversationStore,
@@ -63,6 +63,9 @@ export class PrismaConversationStore implements ConversationStore {
         chatId: input.chatId,
         phoneE164: input.phoneE164,
         step: input.step as PrismaConversationStep,
+        flowKey: input.flowKey ?? null,
+        stepKey: input.stepKey ?? input.step,
+        flowData: toPrismaJson(input.flowData),
         selectedTipo: input.selectedTipo ?? null,
         selectedEmpresaId: input.selectedEmpresaId ?? null,
         selectedTipoServico: input.selectedTipoServico ?? null,
@@ -77,6 +80,9 @@ export class PrismaConversationStore implements ConversationStore {
       update: {
         phoneE164: input.phoneE164,
         step: input.step as PrismaConversationStep,
+        flowKey: input.flowKey ?? null,
+        stepKey: input.stepKey ?? input.step,
+        flowData: toPrismaJson(input.flowData),
         selectedTipo: input.selectedTipo ?? null,
         selectedEmpresaId: input.selectedEmpresaId ?? null,
         selectedTipoServico: input.selectedTipoServico ?? null,
@@ -207,6 +213,9 @@ function mapState(state: {
   chatId: string;
   phoneE164: string;
   step: string;
+  flowKey?: string | null;
+  stepKey?: string | null;
+  flowData?: Prisma.JsonValue | null;
   selectedTipo: string | null;
   selectedEmpresaId: bigint | null;
   selectedTipoServico: string | null;
@@ -218,19 +227,65 @@ function mapState(state: {
   selectedTrainingPhotoCount?: number | null;
   pendingEntradaId: bigint | null;
 }): ConversationStateRecord {
+  const flowData = normalizeFlowData(state.flowData);
+
   return {
     chatId: state.chatId,
     phoneE164: state.phoneE164,
     step: state.step as ConversationStateRecord["step"],
-    selectedTipo: state.selectedTipo,
-    selectedEmpresaId: state.selectedEmpresaId,
-    selectedTipoServico: state.selectedTipoServico,
-    selectedNumeroProcedimento: state.selectedNumeroProcedimento,
-    selectedTreinamentoTema: state.selectedTreinamentoTema ?? null,
-    selectedTreinamentoParticipantes: state.selectedTreinamentoParticipantes ?? null,
-    selectedTreinamentoInicio: state.selectedTreinamentoInicio ?? null,
-    selectedTreinamentoFim: state.selectedTreinamentoFim ?? null,
-    selectedTrainingPhotoCount: state.selectedTrainingPhotoCount ?? null,
-    pendingEntradaId: state.pendingEntradaId
+    flowKey: state.flowKey ?? null,
+    stepKey: state.stepKey ?? state.step,
+    flowData,
+    selectedTipo: state.selectedTipo ?? stringFromFlowData(flowData.selectedTipo),
+    selectedEmpresaId: state.selectedEmpresaId ?? bigintFromFlowData(flowData.selectedEmpresaId),
+    selectedTipoServico: state.selectedTipoServico ?? stringFromFlowData(flowData.selectedTipoServico),
+    selectedNumeroProcedimento:
+      state.selectedNumeroProcedimento ?? stringFromFlowData(flowData.selectedNumeroProcedimento),
+    selectedTreinamentoTema: state.selectedTreinamentoTema ?? stringFromFlowData(flowData.selectedTreinamentoTema),
+    selectedTreinamentoParticipantes:
+      state.selectedTreinamentoParticipantes ?? stringFromFlowData(flowData.selectedTreinamentoParticipantes),
+    selectedTreinamentoInicio:
+      state.selectedTreinamentoInicio ?? dateFromFlowData(flowData.selectedTreinamentoInicio),
+    selectedTreinamentoFim: state.selectedTreinamentoFim ?? dateFromFlowData(flowData.selectedTreinamentoFim),
+    selectedTrainingPhotoCount:
+      state.selectedTrainingPhotoCount ?? numberFromFlowData(flowData.selectedTrainingPhotoCount),
+    pendingEntradaId: state.pendingEntradaId ?? bigintFromFlowData(flowData.pendingEntradaId)
   };
+}
+
+function toPrismaJson(flowData: ConversationStateRecord["flowData"]): Prisma.InputJsonValue {
+  return (flowData ?? {}) as Prisma.InputJsonValue;
+}
+
+function normalizeFlowData(value: Prisma.JsonValue | null | undefined): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function stringFromFlowData(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function numberFromFlowData(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function bigintFromFlowData(value: unknown): bigint | null {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) {
+    return null;
+  }
+
+  return BigInt(value);
+}
+
+function dateFromFlowData(value: unknown): Date | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

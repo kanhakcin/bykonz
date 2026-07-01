@@ -72,4 +72,30 @@ describe("Express app", () => {
 
     expect(handler.calls).toEqual([PAYLOAD]);
   });
+
+  it("includes security headers from helmet", async () => {
+    const handler = new FakeWebhookHandler();
+    const app = createApp(handler);
+
+    const res = await request(app).get("/health");
+
+    expect(res.headers["x-powered-by"]).toBeUndefined();
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["x-frame-options"]).toBeDefined();
+  });
+
+  it("rate limits excessive webhook requests", async () => {
+    const handler = new FakeWebhookHandler();
+    // limite baixo para teste
+    const app = createApp(handler, undefined, { webhookRateLimit: 3 });
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app).post("/webhooks/waha").send(PAYLOAD)
+      )
+    );
+
+    const statuses = responses.map((r) => r.status);
+    expect(statuses.filter((s) => s === 429).length).toBeGreaterThan(0);
+  });
 });

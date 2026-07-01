@@ -36,11 +36,12 @@ export function createApp(
   app.post("/webhooks/waha", webhookLimiter, async (req: Request, res: Response, next: NextFunction) => {
     if (webhookSecret) {
       const token = req.headers["x-webhook-secret"];
-      if (
-        typeof token !== "string" ||
-        token.length !== webhookSecret.length ||
-        !timingSafeEqual(Buffer.from(token), Buffer.from(webhookSecret))
-      ) {
+      const tokenBuf = Buffer.from(typeof token === "string" ? token : "");
+      const secretBuf = Buffer.from(webhookSecret);
+      const valid =
+        tokenBuf.length === secretBuf.length &&
+        timingSafeEqual(tokenBuf, secretBuf);
+      if (!valid) {
         res.status(401).json({ ok: false, error: "Unauthorized" });
         return;
       }

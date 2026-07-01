@@ -5,7 +5,7 @@ export interface WebhookHandler {
   handleWebhook(webhook: WahaWebhook): Promise<void>;
 }
 
-export function createApp(webhookHandler: WebhookHandler): express.Express {
+export function createApp(webhookHandler: WebhookHandler, webhookSecret?: string): express.Express {
   const app = express();
 
   app.use(express.json({ limit: "10mb" }));
@@ -15,6 +15,14 @@ export function createApp(webhookHandler: WebhookHandler): express.Express {
   });
 
   app.post("/webhooks/waha", async (req: Request, res: Response, next: NextFunction) => {
+    if (webhookSecret) {
+      const token = req.headers["x-webhook-secret"];
+      if (token !== webhookSecret) {
+        res.status(401).json({ ok: false, error: "Unauthorized" });
+        return;
+      }
+    }
+
     try {
       await webhookHandler.handleWebhook(req.body as WahaWebhook);
       res.status(200).json({ ok: true });

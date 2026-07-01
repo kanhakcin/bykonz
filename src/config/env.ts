@@ -4,11 +4,12 @@ export interface AppConfig {
   nodeEnv: string;
   port: number;
   databaseUrl: string;
-  s3Endpoint: string;
-  s3Region: string;
-  s3AccessKeyId: string;
-  s3SecretAccessKey: string;
-  s3Bucket: string;
+  s3Endpoint: string | undefined;
+  s3Region: string | undefined;
+  s3AccessKeyId: string | undefined;
+  s3SecretAccessKey: string | undefined;
+  s3Bucket: string | undefined;
+  webhookSecret: string | undefined;
   wahaBaseUrl: string;
   wahaApiKey: string;
   wahaSession: string;
@@ -17,11 +18,6 @@ export interface AppConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const required = [
     "DATABASE_URL",
-    "ENDPOINT",
-    "REGION",
-    "ACCESS_KEY_ID",
-    "SECRET_ACCESS_KEY",
-    "S3_BUCKET",
     "WAHA_BASE_URL",
     "WAHA_API_KEY",
     "WAHA_SESSION"
@@ -41,11 +37,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     nodeEnv: env.NODE_ENV ?? "development",
     port,
     databaseUrl: env.DATABASE_URL!,
-    s3Endpoint: normalizeUrlOriginAndPath(env.ENDPOINT!, "ENDPOINT"),
-    s3Region: env.REGION!,
-    s3AccessKeyId: env.ACCESS_KEY_ID!,
-    s3SecretAccessKey: env.SECRET_ACCESS_KEY!,
-    s3Bucket: env.S3_BUCKET!,
+    s3Endpoint: env.ENDPOINT ? normalizeUrlOriginAndPath(env.ENDPOINT, "ENDPOINT") : undefined,
+    s3Region: env.REGION,
+    s3AccessKeyId: env.ACCESS_KEY_ID,
+    s3SecretAccessKey: env.SECRET_ACCESS_KEY,
+    s3Bucket: env.S3_BUCKET,
+    webhookSecret: env.WEBHOOK_SECRET,
     wahaBaseUrl: env.WAHA_BASE_URL!.replace(/\/+$/, ""),
     wahaApiKey: env.WAHA_API_KEY!,
     wahaSession: env.WAHA_SESSION!

@@ -4,7 +4,7 @@ import { createConversationService } from "./container";
 import { prisma } from "./lib/prisma";
 
 const config = loadConfig();
-const app = createApp(createConversationService(config));
+const app = createApp(createConversationService(config), config.webhookSecret);
 const PORT = process.env.PORT || 8080;
 
 const server = app.listen(PORT, () => {

@@ -1139,13 +1139,14 @@ describe("ConversationService", () => {
   it("serializes concurrent messages for the same chatId", async () => {
     const { service, store } = createHarness();
 
-    const order: number[] = [];
+    const timestamps: { start: number; end: number }[] = [];
     const originalGetState = store.getState.bind(store);
     let callCount = 0;
     store.getState = async (chatId: string) => {
       const n = ++callCount;
-      order.push(n);
-      await new Promise((resolve) => setTimeout(resolve, n === 1 ? 20 : 0));
+      const start = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, n === 1 ? 30 : 0));
+      timestamps.push({ start, end: Date.now() });
       return originalGetState(chatId);
     };
 
@@ -1160,9 +1161,9 @@ describe("ConversationService", () => {
       service.handleWebhook(webhook("msg2"))
     ]);
 
-    // msg1 started first (callCount=1, delay=20ms) and msg2 waited.
-    // So msg2 only called getState after msg1 finished — order must be [1, 2].
-    expect(order[0]).toBe(1);
-    expect(order[1]).toBe(2);
+    // With mutex: msg2 starts only after msg1 finishes (including its 30ms delay).
+    // Without mutex: both would start simultaneously and timestamps[1].start < timestamps[0].end.
+    expect(timestamps).toHaveLength(2);
+    expect(timestamps[1].start).toBeGreaterThanOrEqual(timestamps[0].end);
   });
 });

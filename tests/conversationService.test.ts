@@ -1135,4 +1135,34 @@ describe("ConversationService", () => {
       expect(messaging.messages.at(-1)?.text).toContain("Nenhuma empresa vinculada");
     });
   });
+
+  it("serializes concurrent messages for the same chatId", async () => {
+    const { service, store } = createHarness();
+
+    const order: number[] = [];
+    const originalGetState = store.getState.bind(store);
+    let callCount = 0;
+    store.getState = async (chatId: string) => {
+      const n = ++callCount;
+      order.push(n);
+      await new Promise((resolve) => setTimeout(resolve, n === 1 ? 20 : 0));
+      return originalGetState(chatId);
+    };
+
+    const webhook = (body: string): WahaWebhook => ({
+      event: "message",
+      session: "default",
+      payload: { from: `${PHONE}@c.us`, body, hasMedia: false }
+    });
+
+    await Promise.all([
+      service.handleWebhook(webhook("msg1")),
+      service.handleWebhook(webhook("msg2"))
+    ]);
+
+    // msg1 started first (callCount=1, delay=20ms) and msg2 waited.
+    // So msg2 only called getState after msg1 finished — order must be [1, 2].
+    expect(order[0]).toBe(1);
+    expect(order[1]).toBe(2);
+  });
 });

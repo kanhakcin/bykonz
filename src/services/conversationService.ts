@@ -32,6 +32,7 @@ const RESET_COMMANDS = new Set(["0", "menu", "cancelar"]);
 
 export class ConversationService {
   private readonly flowRegistry: FlowRegistry;
+  private readonly chatLocks = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: ConversationServiceDeps) {
     this.flowRegistry = createFlowRegistry(deps);
@@ -48,6 +49,29 @@ export class ConversationService {
       return;
     }
 
+    await this.withChatLock(chatId, () => this.processWebhook(chatId, webhook));
+  }
+
+  private async withChatLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.chatLocks.get(chatId) ?? Promise.resolve();
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.chatLocks.set(chatId, prev.then(() => next));
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.chatLocks.get(chatId) === next) {
+        this.chatLocks.delete(chatId);
+      }
+    }
+  }
+
+  private async processWebhook(chatId: string, webhook: WahaWebhook): Promise<void> {
+    const payload = webhook.payload;
     const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
     const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);
     const phoneDebugFields = this.wahaPhoneDebugFields(payload);

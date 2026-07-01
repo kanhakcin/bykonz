@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 import type { WahaWebhook } from "./types/waha";
 
@@ -17,7 +18,11 @@ export function createApp(webhookHandler: WebhookHandler, webhookSecret?: string
   app.post("/webhooks/waha", async (req: Request, res: Response, next: NextFunction) => {
     if (webhookSecret) {
       const token = req.headers["x-webhook-secret"];
-      if (token !== webhookSecret) {
+      if (
+        typeof token !== "string" ||
+        token.length !== webhookSecret.length ||
+        !timingSafeEqual(Buffer.from(token), Buffer.from(webhookSecret))
+      ) {
         res.status(401).json({ ok: false, error: "Unauthorized" });
         return;
       }

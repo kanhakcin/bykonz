@@ -9,18 +9,24 @@ import type {
   SaveConversationStateInput,
   UserRecord
 } from "./conversationService";
-import { phoneDigitsToBigInt } from "../utils/phone";
+import { phoneDigitsToE164 } from "../utils/phone";
 
+/**
+ * Adapter do port ConversationStore para o schema em inglês (tabelas
+ * snake_case plural). As formas dos records do domínio (em português,
+ * definidas em src/flows/types.ts) são preservadas — a tradução de nomes
+ * acontece somente aqui.
+ */
 export class PrismaConversationStore implements ConversationStore {
   constructor(private readonly prisma: PrismaClient) {}
 
   async findUserByPhone(phoneDigits: string): Promise<UserRecord | null> {
-    const phoneE164 = phoneDigitsToBigInt(phoneDigits);
+    const phoneE164 = phoneDigitsToE164(phoneDigits);
     if (!phoneE164) {
       return null;
     }
 
-    const user = await this.prisma.usuario.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { phoneE164 }
     });
 
@@ -30,21 +36,21 @@ export class PrismaConversationStore implements ConversationStore {
 
     return {
       id: user.id,
-      phoneE164: user.phoneE164.toString(),
-      nome: user.nome
+      phoneE164: user.phoneE164.replace(/^\+/, ""),
+      nome: user.name
     };
   }
 
   async findEmpresasByUser(userId: number): Promise<EmpresaRecord[]> {
-    const links = await this.prisma.userEmpresa.findMany({
+    const links = await this.prisma.userCompany.findMany({
       where: { userId },
-      include: { empresa: true },
-      orderBy: { empresaId: "asc" }
+      include: { company: true },
+      orderBy: { companyId: "asc" }
     });
 
     return links.map((link) => ({
-      id: link.empresa.id,
-      nome: link.empresa.nome
+      id: link.company.id,
+      nome: link.company.name
     }));
   }
 
@@ -57,43 +63,28 @@ export class PrismaConversationStore implements ConversationStore {
   }
 
   async saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord> {
+    const fields = {
+      phoneE164: input.phoneE164,
+      step: input.step as PrismaConversationStep,
+      flowKey: input.flowKey ?? null,
+      stepKey: input.stepKey ?? input.step,
+      flowData: toPrismaJson(input.flowData),
+      selectedCategory: input.selectedTipo ?? null,
+      selectedCompanyId: input.selectedEmpresaId ?? null,
+      selectedServiceType: input.selectedTipoServico ?? null,
+      selectedProcedureNumber: input.selectedNumeroProcedimento ?? null,
+      selectedTrainingTopic: input.selectedTreinamentoTema ?? null,
+      selectedTrainingParticipants: input.selectedTreinamentoParticipantes ?? null,
+      selectedTrainingStartsAt: input.selectedTreinamentoInicio ?? null,
+      selectedTrainingEndsAt: input.selectedTreinamentoFim ?? null,
+      selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
+      pendingEntryId: input.pendingEntradaId ?? null
+    };
+
     const state = await this.prisma.whatsappConversationState.upsert({
       where: { chatId: input.chatId },
-      create: {
-        chatId: input.chatId,
-        phoneE164: input.phoneE164,
-        step: input.step as PrismaConversationStep,
-        flowKey: input.flowKey ?? null,
-        stepKey: input.stepKey ?? input.step,
-        flowData: toPrismaJson(input.flowData),
-        selectedTipo: input.selectedTipo ?? null,
-        selectedEmpresaId: input.selectedEmpresaId ?? null,
-        selectedTipoServico: input.selectedTipoServico ?? null,
-        selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
-        selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
-        selectedTreinamentoParticipantes: input.selectedTreinamentoParticipantes ?? null,
-        selectedTreinamentoInicio: input.selectedTreinamentoInicio ?? null,
-        selectedTreinamentoFim: input.selectedTreinamentoFim ?? null,
-        selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
-        pendingEntradaId: input.pendingEntradaId ?? null
-      },
-      update: {
-        phoneE164: input.phoneE164,
-        step: input.step as PrismaConversationStep,
-        flowKey: input.flowKey ?? null,
-        stepKey: input.stepKey ?? input.step,
-        flowData: toPrismaJson(input.flowData),
-        selectedTipo: input.selectedTipo ?? null,
-        selectedEmpresaId: input.selectedEmpresaId ?? null,
-        selectedTipoServico: input.selectedTipoServico ?? null,
-        selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
-        selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
-        selectedTreinamentoParticipantes: input.selectedTreinamentoParticipantes ?? null,
-        selectedTreinamentoInicio: input.selectedTreinamentoInicio ?? null,
-        selectedTreinamentoFim: input.selectedTreinamentoFim ?? null,
-        selectedTrainingPhotoCount: input.selectedTrainingPhotoCount ?? null,
-        pendingEntradaId: input.pendingEntradaId ?? null
-      }
+      create: { chatId: input.chatId, ...fields },
+      update: fields
     });
 
     return mapState(state);
@@ -106,62 +97,62 @@ export class PrismaConversationStore implements ConversationStore {
   }
 
   async createEntrada(input: CreateEntradaInput): Promise<{ id: bigint }> {
-    const entrada = await this.prisma.entrada.create({
+    const entry = await this.prisma.entry.create({
       data: {
         userId: input.userId,
-        empresaId: input.empresaId,
-        tipo: input.tipo,
-        tipoServico: input.tipoServico ?? null,
-        numeroProcedimento: input.numeroProcedimento ?? null,
+        companyId: input.empresaId,
+        category: input.tipo,
+        serviceType: input.tipoServico ?? null,
+        procedureNumber: input.numeroProcedimento ?? null,
         description: input.description
       },
       select: { id: true }
     });
 
-    return entrada;
+    return entry;
   }
 
   async createTreinamento(input: CreateTreinamentoInput): Promise<{ entradaId: bigint; treinamentoId: number }> {
     return this.prisma.$transaction(async (tx) => {
-      const entrada = await tx.entrada.create({
+      const entry = await tx.entry.create({
         data: {
           userId: input.userId,
-          empresaId: input.empresaId,
-          tipo: "Treinamento",
-          tipoServico: null,
-          numeroProcedimento: null,
+          companyId: input.empresaId,
+          category: "Treinamento",
+          serviceType: null,
+          procedureNumber: null,
           description: ""
         },
         select: { id: true }
       });
 
-      const treinamento = await tx.treinamento.create({
+      const training = await tx.training.create({
         data: {
-          entradaId: entrada.id,
-          tema: input.tema,
-          participantes: input.participantes,
-          inicio: input.inicio,
-          fim: input.fim
+          entryId: entry.id,
+          topic: input.tema,
+          participants: input.participantes,
+          startsAt: input.inicio,
+          endsAt: input.fim
         },
         select: { id: true }
       });
 
-      return { entradaId: entrada.id, treinamentoId: treinamento.id };
+      return { entradaId: entry.id, treinamentoId: training.id };
     });
   }
 
   async addEntradaMedia(input: { entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }): Promise<void> {
-    await this.prisma.entradaMedia.create({
+    await this.prisma.entryMedia.create({
       data: {
-        entradaId: input.entradaId,
+        entryId: input.entradaId,
         mediaUrl: input.mediaUrl,
-        mediaTipo: input.mediaTipo ?? null
+        mediaType: input.mediaTipo ?? null
       }
     });
   }
 
   async updateEntradaDescription(entradaId: bigint, description: string): Promise<void> {
-    await this.prisma.entrada.update({
+    await this.prisma.entry.update({
       where: { id: entradaId },
       data: { description }
     });
@@ -173,37 +164,37 @@ export class PrismaConversationStore implements ConversationStore {
     dateStart: Date;
     dateEnd: Date;
   }): Promise<EntradaForReport[]> {
-    const entradas = await this.prisma.entrada.findMany({
+    const entries = await this.prisma.entry.findMany({
       where: {
-        empresaId: input.empresaId,
-        tipo: input.tipo,
+        companyId: input.empresaId,
+        category: input.tipo,
         createdAt: {
           gte: input.dateStart,
           lt: input.dateEnd
         }
       },
       include: {
-        empresa: { select: { nome: true } },
-        usuario: { select: { nome: true } },
+        company: { select: { name: true } },
+        user: { select: { name: true } },
         media: { select: { mediaUrl: true } },
-        treinamento: true
+        training: true
       },
       orderBy: { createdAt: "asc" }
     });
 
-    return entradas.map((e) => ({
+    return entries.map((e) => ({
       id: e.id,
       description: e.description,
       createdAt: e.createdAt,
-      tipo: e.tipo,
-      tipoServico: e.tipoServico,
-      numeroProcedimento: e.numeroProcedimento,
-      treinamentoTema: e.treinamento?.tema ?? null,
-      treinamentoParticipantes: e.treinamento?.participantes ?? null,
-      treinamentoInicio: e.treinamento?.inicio ?? null,
-      treinamentoFim: e.treinamento?.fim ?? null,
-      empresaNome: e.empresa?.nome ?? null,
-      usuarioNome: e.usuario.nome ?? null,
+      tipo: e.category,
+      tipoServico: e.serviceType,
+      numeroProcedimento: e.procedureNumber,
+      treinamentoTema: e.training?.topic ?? null,
+      treinamentoParticipantes: e.training?.participants ?? null,
+      treinamentoInicio: e.training?.startsAt ?? null,
+      treinamentoFim: e.training?.endsAt ?? null,
+      empresaNome: e.company?.name ?? null,
+      usuarioNome: e.user.name ?? null,
       mediaUrls: e.media.map((m) => m.mediaUrl)
     }));
   }
@@ -216,16 +207,16 @@ function mapState(state: {
   flowKey?: string | null;
   stepKey?: string | null;
   flowData?: Prisma.JsonValue | null;
-  selectedTipo: string | null;
-  selectedEmpresaId: bigint | null;
-  selectedTipoServico: string | null;
-  selectedNumeroProcedimento: string | null;
-  selectedTreinamentoTema?: string | null;
-  selectedTreinamentoParticipantes?: string | null;
-  selectedTreinamentoInicio?: Date | null;
-  selectedTreinamentoFim?: Date | null;
+  selectedCategory: string | null;
+  selectedCompanyId: bigint | null;
+  selectedServiceType: string | null;
+  selectedProcedureNumber: string | null;
+  selectedTrainingTopic?: string | null;
+  selectedTrainingParticipants?: string | null;
+  selectedTrainingStartsAt?: Date | null;
+  selectedTrainingEndsAt?: Date | null;
   selectedTrainingPhotoCount?: number | null;
-  pendingEntradaId: bigint | null;
+  pendingEntryId: bigint | null;
 }): ConversationStateRecord {
   const flowData = normalizeFlowData(state.flowData);
 
@@ -236,20 +227,20 @@ function mapState(state: {
     flowKey: state.flowKey ?? null,
     stepKey: state.stepKey ?? state.step,
     flowData,
-    selectedTipo: state.selectedTipo ?? stringFromFlowData(flowData.selectedTipo),
-    selectedEmpresaId: state.selectedEmpresaId ?? bigintFromFlowData(flowData.selectedEmpresaId),
-    selectedTipoServico: state.selectedTipoServico ?? stringFromFlowData(flowData.selectedTipoServico),
+    selectedTipo: state.selectedCategory ?? stringFromFlowData(flowData.selectedTipo),
+    selectedEmpresaId: state.selectedCompanyId ?? bigintFromFlowData(flowData.selectedEmpresaId),
+    selectedTipoServico: state.selectedServiceType ?? stringFromFlowData(flowData.selectedTipoServico),
     selectedNumeroProcedimento:
-      state.selectedNumeroProcedimento ?? stringFromFlowData(flowData.selectedNumeroProcedimento),
-    selectedTreinamentoTema: state.selectedTreinamentoTema ?? stringFromFlowData(flowData.selectedTreinamentoTema),
+      state.selectedProcedureNumber ?? stringFromFlowData(flowData.selectedNumeroProcedimento),
+    selectedTreinamentoTema: state.selectedTrainingTopic ?? stringFromFlowData(flowData.selectedTreinamentoTema),
     selectedTreinamentoParticipantes:
-      state.selectedTreinamentoParticipantes ?? stringFromFlowData(flowData.selectedTreinamentoParticipantes),
+      state.selectedTrainingParticipants ?? stringFromFlowData(flowData.selectedTreinamentoParticipantes),
     selectedTreinamentoInicio:
-      state.selectedTreinamentoInicio ?? dateFromFlowData(flowData.selectedTreinamentoInicio),
-    selectedTreinamentoFim: state.selectedTreinamentoFim ?? dateFromFlowData(flowData.selectedTreinamentoFim),
+      state.selectedTrainingStartsAt ?? dateFromFlowData(flowData.selectedTreinamentoInicio),
+    selectedTreinamentoFim: state.selectedTrainingEndsAt ?? dateFromFlowData(flowData.selectedTreinamentoFim),
     selectedTrainingPhotoCount:
       state.selectedTrainingPhotoCount ?? numberFromFlowData(flowData.selectedTrainingPhotoCount),
-    pendingEntradaId: state.pendingEntradaId ?? bigintFromFlowData(flowData.pendingEntradaId)
+    pendingEntradaId: state.pendingEntryId ?? bigintFromFlowData(flowData.pendingEntradaId)
   };
 }
 

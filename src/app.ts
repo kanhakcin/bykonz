@@ -10,6 +10,8 @@ export interface WebhookHandler {
 
 interface AppOptions {
   webhookRateLimit?: number;
+  /** Router da API do painel do gestor, montado em /api/v1. */
+  panelRouter?: express.Router;
 }
 
 export function createApp(
@@ -54,6 +56,10 @@ export function createApp(
       next(error);
     }
   });
+
+  if (options.panelRouter) {
+    app.use("/api/v1", options.panelRouter);
+  }
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(error);

@@ -27,6 +27,7 @@ describe("env config", () => {
     expect(config.s3Region).toBe("sa-east-1");
     expect(config.s3AccessKeyId).toBe("access-key");
     expect(config.s3SecretAccessKey).toBe("secret-key");
+    expect(config.s3Bucket).toBe("tatacon");
     expect(config.wahaBaseUrl).toBe("http://localhost:3000");
   });
 });

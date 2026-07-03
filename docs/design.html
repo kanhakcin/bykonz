@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diário das Obras — Painel do Gestor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1B2230; --ink-2:#252E3E; --ink-line:#333D4F;
+    --surface:#F3F4F0; --card:#FFFFFF; --line:#E4E3DC; --line-2:#EFEEE8;
+    --steel:#2B5E7E; --steel-d:#1E4860;
+    --amber:#C07E1E; --amber-bg:#FBEFD6;
+    --green:#357046; --green-bg:#E7F1E7;
+    --red:#B0412B; --red-bg:#F8E6E0;
+    --text:#1E2733; --muted:#697079; --muted-2:#9AA0AA;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --disp:"Space Grotesk",ui-sans-serif,system-ui,sans-serif;
+    --body:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --r:10px; --r-sm:7px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--body);background:var(--surface);color:var(--text);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.15em}
+  .app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+ 
+  /* sidebar */
+  .side{background:var(--ink);color:#C7CCD5;display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:11px;padding:20px 20px 18px}
+  .brand .mk{width:34px;height:34px;border-radius:8px;background:var(--steel);display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;flex:none}
+  .brand b{font-family:var(--disp);font-weight:600;font-size:16px;color:#fff;letter-spacing:.2px;line-height:1.15}
+  .brand small{display:block;color:#8A92A0;font-size:11px;font-weight:400;letter-spacing:.3px}
+  .nav{padding:8px 12px;display:flex;flex-direction:column;gap:2px}
+  .nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;border:0;color:#AEB5C0;font:inherit;font-size:14px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .15s,color .15s}
+  .nav button:hover{background:var(--ink-2);color:#fff}
+  .nav button.active{background:var(--steel);color:#fff}
+  .nav .ic{font-size:18px}
+  .side .sep{height:1px;background:var(--ink-line);margin:12px 20px}
+  .secsw{padding:0 16px;margin-top:auto;margin-bottom:8px}
+  .secsw .lbl{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#7C84913;color:#828A98;padding:0 4px 8px}
+  .seg{display:flex;background:var(--ink-2);border-radius:9px;padding:3px}
+  .seg button{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;border:0;background:none;color:#AEB5C0;font:inherit;font-size:13px;padding:8px 6px;border-radius:7px;cursor:pointer;transition:background .15s,color .15s}
+  .seg button.on{background:var(--steel);color:#fff}
+  .seg .ic{font-size:16px}
+  .who{display:flex;align-items:center;gap:10px;padding:14px 20px;border-top:1px solid var(--ink-line)}
+  .who .av{width:32px;height:32px;border-radius:50%;background:#3A4456;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex:none}
+  .who .nm{font-size:13px;color:#E4E7EC;line-height:1.2}
+  .who .rl{font-size:11px;color:#828A98}
+ 
+  /* main */
+  .main{min-width:0;display:flex;flex-direction:column}
+  .top{display:flex;align-items:center;gap:16px;padding:16px 28px;background:rgba(243,244,240,.86);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  .proj{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+  .proj .p1{font-family:var(--disp);font-weight:600;font-size:17px;display:flex;align-items:center;gap:8px}
+  .proj .p2{font-size:12.5px;color:var(--muted)}
+  .chip-date{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:7px 13px;font-size:13px;color:var(--text)}
+  .top .spacer{flex:1}
+  .badge-mock{font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--amber);background:var(--amber-bg);border-radius:6px;padding:4px 9px}
+ 
+  .wrap{padding:24px 28px 40px;max-width:1180px;width:100%}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted-2);margin:0 0 12px}
+ 
+  /* kpis */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:26px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;position:relative;overflow:hidden}
+  .kpi .k-lbl{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .kpi .k-lbl .ic{font-size:15px;color:var(--muted-2)}
+  .kpi .k-val{font-family:var(--disp);font-weight:600;font-size:34px;line-height:1.1;margin-top:8px;letter-spacing:-.5px}
+  .kpi .k-sub{font-size:12px;color:var(--muted-2);margin-top:2px}
+  .kpi.warn .k-val{color:var(--amber)}
+  .kpi .rail{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--steel)}
+  .kpi.warn .rail{background:var(--amber)}
+  .kpi.good .rail{background:var(--green)}
+ 
+  /* layout split */
+  .split{display:grid;grid-template-columns:1fr 340px;gap:22px;align-items:start}
+  .sec-h{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 14px}
+  .sec-h h2{font-family:var(--disp);font-weight:600;font-size:18px;margin:0}
+  .sec-h .cnt{font-size:13px;color:var(--muted)}
+ 
+  /* registro card */
+  .reg{display:grid;grid-template-columns:108px 1fr;gap:0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:13px}
+  .reg .thumb{background:#E9EAE3;position:relative;display:flex;align-items:center;justify-content:center;color:#AAB0A8;min-height:118px;background-image:linear-gradient(0deg,rgba(0,0,0,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.035) 1px,transparent 1px);background-size:14px 14px}
+  .reg .thumb .ic{font-size:30px}
+  .reg .thumb .tm{position:absolute;left:8px;bottom:7px;font-family:var(--mono);font-size:11px;color:#5E645C;background:rgba(255,255,255,.7);padding:1px 6px;border-radius:5px}
+  .reg .body{padding:13px 15px;display:flex;flex-direction:column;gap:9px;border-left:3px solid var(--green);min-width:0}
+  .reg.alert .body{border-left-color:var(--amber)}
+  .reg.crit .body{border-left-color:var(--red)}
+  .reg .cap{font-size:14.5px;line-height:1.45}
+  .reg .tags{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+  .reg .foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:2px}
+  .reg .author{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .reg .author .av{width:20px;height:20px;border-radius:50%;background:#DCE6EC;color:var(--steel-d);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}
+ 
+  /* code/entity tags */
+  .tag{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);background:#FAFAF7}
+  .tag.code{font-family:var(--mono);font-weight:500}
+  .tag .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .tag .dot.codigo{background:var(--steel)}
+  .tag .dot.ia{background:none;border:1.6px solid var(--amber)}
+  .tag .src{font-family:var(--body);font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted-2)}
+  .tag.norma{color:var(--steel-d)}
+  .tag.pessoa .ic,.tag.maquina .ic{font-size:13px;color:var(--muted)}
+ 
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;padding:3px 9px;border-radius:99px}
+  .pill .ic{font-size:13px}
+  .pill.ok{background:var(--green-bg);color:var(--green)}
+  .pill.alert{background:var(--amber-bg);color:var(--amber)}
+  .pill.crit{background:var(--red-bg);color:var(--red)}
+ 
+  /* rail cards */
+  .rail-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;margin-bottom:18px}
+  .rail-card h3{font-family:var(--disp);font-weight:600;font-size:15px;margin:0 0 3px;display:flex;align-items:center;gap:8px}
+  .rail-card h3 .ic{font-size:17px}
+  .rail-card .hint{font-size:12px;color:var(--muted);margin:0 0 13px}
+  .item{border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 12px;margin-bottom:9px}
+  .item:last-child{margin-bottom:0}
+  .item .it-top{display:flex;gap:9px;align-items:flex-start}
+  .item .it-ic{flex:none;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .item.warn .it-ic{background:var(--amber-bg);color:var(--amber)}
+  .item.crit .it-ic{background:var(--red-bg);color:var(--red)}
+  .item .it-t{font-size:13.5px;font-weight:500;line-height:1.3}
+  .item .it-d{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.4}
+  .item .it-ref{font-family:var(--mono);font-size:11px;color:var(--muted-2);margin-top:5px}
+  .item .acts{display:flex;gap:7px;margin-top:10px}
+  .btn{font:inherit;font-size:12.5px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:7px;padding:6px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .15s,border-color .15s}
+  .btn:hover{background:#F6F6F2}
+  .btn .ic{font-size:14px}
+  .btn.primary{background:var(--steel);border-color:var(--steel);color:#fff}
+  .btn.primary:hover{background:var(--steel-d)}
+  .btn.ghost{color:var(--muted)}
+  .conf{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto;align-self:center}
+  .empty-rail{font-size:13px;color:var(--muted-2);text-align:center;padding:14px 6px}
+  .empty-rail .ic{font-size:22px;color:var(--green);display:block;margin:0 auto 6px}
+ 
+  /* placeholder sections */
+  .ph{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:30px}
+  .ph h2{font-family:var(--disp);font-weight:600;margin:0 0 6px;font-size:20px}
+  .ph p{color:var(--muted);margin:0 0 20px;max-width:560px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:13px}
+  .tile{border:1px solid var(--line);border-radius:var(--r-sm);padding:15px;display:flex;gap:12px;align-items:flex-start}
+  .tile .ic{font-size:22px;color:var(--steel);flex:none}
+  .tile b{font-weight:600;font-size:14.5px}
+  .tile span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px}
+ 
+  .hide{display:none}
+ 
+  /* toast */
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13.5px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;display:flex;align-items:center;gap:9px;z-index:50}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast .ic{font-size:17px;color:#7FD0A0}
+ 
+  .reveal{animation:rise .45s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+ 
+  :focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+ 
+  @media (max-width:960px){
+    .app{grid-template-columns:1fr}
+    .side{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center}
+    .brand{flex:1}
+    .nav{flex-direction:row;flex-wrap:wrap;order:3;width:100%}
+    .side .sep{display:none}
+    .secsw{margin:0;order:2}
+    .secsw .lbl{display:none}
+    .who{border-top:0}
+    .split{grid-template-columns:1fr}
+    .kpis{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+ 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M9 5h6M9 5a2 2 0 0 0-2 2v0H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-1M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"/><path d="M8 12h8M8 16h5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 16l-5-5L5 21"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.5 5.5l13 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12l2.5 2.5L16 9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16"/><path d="M15 9h3a2 2 0 0 1 2 2v10"/><path d="M8 7h3M8 11h3M8 15h3M4 21h16"/></symbol>
+  <symbol id="i-ship" viewBox="0 0 24 24"><path d="M3 14l1.5 5a2 2 0 0 0 2 1.5h11a2 2 0 0 0 2-1.5L23 14"/><path d="M5 14V8l7-3 7 3v6"/><path d="M12 5V2"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-cog" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 21v-9M4 7.5l8 4.5 8-4.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></symbol>
+</svg>
+ 
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="mk"><svg class="ic"><use href="#i-cube"/></svg></div>
+      <div><b>Diário das Obras</b><small>Painel do gestor</small></div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="painel" class="active"><svg class="ic"><use href="#i-grid"/></svg> Painel</button>
+      <button data-view="cadastros"><svg class="ic"><use href="#i-clip"/></svg> Cadastros</button>
+      <button data-view="relatorios"><svg class="ic"><use href="#i-file"/></svg> Relatórios</button>
+    </nav>
+    <div class="secsw">
+      <div class="lbl">Setor</div>
+      <div class="seg" id="seg">
+        <button data-sec="civil" class="on"><svg class="ic"><use href="#i-building"/></svg> Civil</button>
+        <button data-sec="naval"><svg class="ic"><use href="#i-ship"/></svg> Naval</button>
+      </div>
+    </div>
+    <div class="who">
+      <div class="av">RT</div>
+      <div><div class="nm">Ricardo Tanen</div><div class="rl">Gestor de obra</div></div>
+    </div>
+  </aside>
+ 
+  <main class="main">
+    <header class="top">
+      <div class="proj">
+        <div class="p1"><svg class="ic" id="proj-ic"><use href="#i-building"/></svg> <span id="proj-name">Obra Residencial Aurora</span></div>
+        <div class="p2" id="proj-ctx">Apto 1403 · Laje tipo 04</div>
+      </div>
+      <div class="spacer"></div>
+      <span class="chip-date"><svg class="ic"><use href="#i-cal"/></svg> Hoje · 25/06/2026</span>
+      <span class="badge-mock">MOCKUP</span>
+    </header>
+ 
+    <!-- PAINEL -->
+    <section class="wrap" id="view-painel">
+      <p class="eyebrow">Visão do dia</p>
+      <div class="kpis" id="kpis"></div>
+ 
+      <div class="split">
+        <div>
+          <div class="sec-h">
+            <h2>Diário de hoje</h2>
+            <span class="cnt" id="reg-cnt"></span>
+          </div>
+          <div id="regs"></div>
+        </div>
+        <div>
+          <div class="rail-card">
+            <h3><svg class="ic" style="color:var(--amber)"><use href="#i-bell"/></svg> Alertas abertos</h3>
+            <p class="hint">Tratar pendências de treinamento e vistoria.</p>
+            <div id="alerts"></div>
+          </div>
+          <div class="rail-card">
+            <h3><svg class="ic" style="color:var(--steel)"><use href="#i-sparkle"/></svg> Triagem da IA</h3>
+            <p class="hint">Vínculos extraídos do texto que precisam de confirmação.</p>
+            <div id="triage"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+ 
+    <!-- CADASTROS -->
+    <section class="wrap hide" id="view-cadastros">
+      <p class="eyebrow">Configuração</p>
+      <div class="ph">
+        <h2>Cadastros</h2>
+        <p>Mantenha o catálogo que alimenta os vínculos automáticos e os alertas. Disponível na próxima entrega desta fase.</p>
+        <div class="tiles">
+          <div class="tile"><svg class="ic"><use href="#i-clip"/></svg><div><b>Normas</b><span>Códigos, títulos e vigência por setor</span></div></div>
+          <div class="tile"><svg class="ic"><use href="#i-user"/></svg><div><b>Pessoas &amp; competências</b><span>Matrícula, status e treinamento por norma</span></div></div>
+          <div class="tile"><svg class="ic"><use href="#i-cog"/></svg><div><b>Máquinas &amp; vistorias</b><span>Checklists e validade de inspeção</span></div></div>
+          <div class="tile"><svg class="ic"><use href="#i-cube"/></svg><div><b>Ativos</b><span>Árvore de locais e estruturas (QR na v2)</span></div></div>
+        </div>
+      </div>
+    </section>
+ 
+    <!-- RELATORIOS -->
+    <section class="wrap hide" id="view-relatorios">
+      <p class="eyebrow">Saída</p>
+      <div class="ph">
+        <h2>Relatórios</h2>
+        <p>Gere o diário em PDF por dia, obra ou apartamento, com fotos, vínculos de norma e alertas do período. Disponível na próxima entrega.</p>
+        <div class="tiles">
+          <div class="tile"><svg class="ic"><use href="#i-file"/></svg><div><b>Diário diário</b><span>Um dia, uma obra</span></div></div>
+          <div class="tile"><svg class="ic"><use href="#i-file"/></svg><div><b>Por período</b><span>Intervalo de datas (v1.x)</span></div></div>
+          <div class="tile"><svg class="ic"><use href="#i-alert"/></svg><div><b>Relatório de alertas</b><span>Não conformidades em aberto</span></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+ 
+<div id="toast"><svg class="ic"><use href="#i-check"/></svg><span id="toast-t"></span></div>
+ 
+<script>
+const DATA = {
+  civil: {
+    project:"Obra Residencial Aurora", ctx:"Apto 1403 · Laje tipo 04", icon:"#i-building",
+    regs:[
+      {tm:"09:14", cap:"Grauteamento da canaleta inferior — cozinha, apto 1403, laje tipo 04, lado esquerdo.",
+        tags:[{k:"code",t:"PS-024",src:"codigo"}], autor:"Eng. Marina Alves", av:"MA", status:"ok"},
+      {tm:"09:16", cap:"José está realizando o grauteamento da canaleta inferior.",
+        tags:[{k:"code",t:"PS-024",src:"codigo"},{k:"pessoa",t:"José Pereira",ic:"#i-user",src:"ia"}], autor:"Eng. Marina Alves", av:"MA", status:"alert"},
+      {tm:"09:21", cap:"Impermeabilização da laje técnica.",
+        tags:[{k:"code",t:"PS-031",src:"codigo"}], autor:"Eng. Marina Alves", av:"MA", status:"ok"},
+      {tm:"10:02", cap:"Misturadora de cimento em operação no pavimento 14.",
+        tags:[{k:"maquina",t:"MX-007",ic:"#i-cog",src:"codigo"}], autor:"Téc. Paulo Reis", av:"PR", status:"crit"}
+    ],
+    alerts:[
+      {sev:"warn", ic:"#i-alert", t:"José Pereira não treinado", d:"Competência ausente para a norma PS-024.", ref:"Registro 09:16 · MAT-118"},
+      {sev:"crit", ic:"#i-ban", t:"Misturadora MX-007 — vistoria vencida", d:"Última vistoria em 02/05 · validade de 30 dias.", ref:"Registro 10:02"}
+    ],
+    triage:[
+      {m:'"José"', tg:"José Pereira (MAT-118)", conf:82, ref:"09:16"}
+    ]
+  },
+  naval: {
+    project:"Estaleiro Itajaí — Doca 2", ctx:'Embarcação "Catarina" · Praça de máquinas', icon:"#i-ship",
+    regs:[
+      {tm:"08:40", cap:"Soldagem de reforço estrutural no compartimento da praça de máquinas.",
+        tags:[{k:"code",t:"NV-012",src:"codigo"}], autor:"Eng. Sofia Marques", av:"SM", status:"ok"},
+      {tm:"09:05", cap:"Carlos executando soldagem no costado, lado bombordo.",
+        tags:[{k:"code",t:"NV-012",src:"codigo"},{k:"pessoa",t:"Carlos Lemes",ic:"#i-user",src:"ia"}], autor:"Eng. Sofia Marques", av:"SM", status:"alert"},
+      {tm:"09:38", cap:"Inspeção visual do convés principal, seção de proa.",
+        tags:[{k:"code",t:"NV-007",src:"codigo"}], autor:"Eng. Sofia Marques", av:"SM", status:"ok"}
+    ],
+    alerts:[
+      {sev:"warn", ic:"#i-alert", t:"Carlos Lemes não treinado", d:"Competência ausente para a norma NV-012.", ref:"Registro 09:05 · MAT-204"}
+    ],
+    triage:[
+      {m:'"Carlos"', tg:"Carlos Lemes (MAT-204)", conf:76, ref:"09:05"}
+    ]
+  }
+};
+ 
+let SEC = "civil";
+const $ = s => document.querySelector(s);
+ 
+function srcTag(src){
+  const lbl = src==="codigo" ? "código" : "IA";
+  return `<span class="dot ${src}"></span><span class="src">${lbl}</span>`;
+}
+function renderTags(tags){
+  return tags.map(t=>{
+    if(t.k==="code") return `<span class="tag code norma">${t.t} ${srcTag(t.src)}</span>`;
+    return `<span class="tag ${t.k}"><svg class="ic"><use href="${t.ic}"/></svg>${t.t} ${srcTag(t.src)}</span>`;
+  }).join("");
+}
+function statusPill(s){
+  if(s==="ok") return `<span class="pill ok"><svg class="ic"><use href="#i-check-circle"/></svg> Conforme</span>`;
+  if(s==="alert") return `<span class="pill alert"><svg class="ic"><use href="#i-alert"/></svg> Alerta</span>`;
+  return `<span class="pill crit"><svg class="ic"><use href="#i-ban"/></svg> Crítico</span>`;
+}
+ 
+function render(){
+  const d = DATA[SEC];
+  $("#proj-name").textContent = d.project;
+  $("#proj-ctx").textContent = d.ctx;
+  $("#proj-ic").innerHTML = `<use href="${d.icon}"/>`;
+ 
+  const total = d.regs.length;
+  const conformes = d.regs.filter(r=>r.status==="ok").length;
+  const conf = Math.round(conformes/total*100);
+  const normas = new Set();
+  d.regs.forEach(r=>r.tags.forEach(t=>{ if(t.k==="code") normas.add(t.t); }));
+ 
+  const kpis = [
+    {lbl:"Registros hoje", ic:"#i-photo", val:total, sub:"fotos no diário", cls:""},
+    {lbl:"Conformidade", ic:"#i-check-circle", val:conf, suffix:"%", sub:`${conformes} de ${total} sem alerta`, cls:"good"},
+    {lbl:"Alertas abertos", ic:"#i-bell", val:d.alerts.length, sub:"para tratar", cls:"warn"},
+    {lbl:"Triagem da IA", ic:"#i-sparkle", val:d.triage.length, sub:"vínculos a confirmar", cls:""}
+  ];
+  $("#kpis").innerHTML = kpis.map(k=>`
+    <div class="kpi ${k.cls}">
+      <div class="rail"></div>
+      <div class="k-lbl"><svg class="ic"><use href="${k.ic}"/></svg>${k.lbl}</div>
+      <div class="k-val" data-to="${k.val}" data-suffix="${k.suffix||""}">0${k.suffix||""}</div>
+      <div class="k-sub">${k.sub}</div>
+    </div>`).join("");
+ 
+  $("#reg-cnt").textContent = `${total} registros · ${normas.size} normas vinculadas`;
+  $("#regs").innerHTML = d.regs.map((r,i)=>`
+    <article class="reg ${r.status} reveal" style="animation-delay:${i*55}ms">
+      <div class="thumb"><svg class="ic"><use href="#i-photo"/></svg><span class="tm">${r.tm}</span></div>
+      <div class="body">
+        <div class="cap">${r.cap}</div>
+        <div class="tags">${renderTags(r.tags)}</div>
+        <div class="foot">
+          <span class="author"><span class="av">${r.av}</span>${r.autor}</span>
+          ${statusPill(r.status)}
+        </div>
+      </div>
+    </article>`).join("");
+ 
+  renderAlerts(); renderTriage(); countUp();
+}
+ 
+function renderAlerts(){
+  const d = DATA[SEC];
+  const el = $("#alerts");
+  if(!d.alerts.length){ el.innerHTML = `<div class="empty-rail"><svg class="ic"><use href="#i-check-circle"/></svg>Nenhum alerta em aberto.</div>`; return; }
+  el.innerHTML = d.alerts.map((a,i)=>`
+    <div class="item ${a.sev}">
+      <div class="it-top">
+        <div class="it-ic"><svg class="ic"><use href="${a.ic}"/></svg></div>
+        <div><div class="it-t">${a.t}</div><div class="it-d">${a.d}</div><div class="it-ref">${a.ref}</div></div>
+      </div>
+      <div class="acts">
+        <button class="btn primary" data-resolve="${i}"><svg class="ic"><use href="#i-check"/></svg>Resolver</button>
+        <button class="btn ghost" data-resolve="${i}">Ignorar</button>
+      </div>
+    </div>`).join("");
+  el.querySelectorAll("[data-resolve]").forEach(b=>b.onclick=()=>{
+    DATA[SEC].alerts.splice(+b.dataset.resolve,1); toast("Alerta tratado"); render();
+  });
+}
+ 
+function renderTriage(){
+  const d = DATA[SEC];
+  const el = $("#triage");
+  if(!d.triage.length){ el.innerHTML = `<div class="empty-rail"><svg class="ic"><use href="#i-check-circle"/></svg>Nada para confirmar.</div>`; return; }
+  el.innerHTML = d.triage.map((t,i)=>`
+    <div class="item">
+      <div class="it-top">
+        <div class="it-ic" style="background:#EAF0F4;color:var(--steel)"><svg class="ic"><use href="#i-sparkle"/></svg></div>
+        <div><div class="it-t">${t.m} → ${t.tg}</div><div class="it-d">Citado no texto, sem matrícula. Confirmar a pessoa?</div><div class="it-ref">Registro ${t.ref}</div></div>
+      </div>
+      <div class="acts">
+        <button class="btn primary" data-tri="${i}"><svg class="ic"><use href="#i-check"/></svg>Confirmar</button>
+        <button class="btn ghost" data-tri="${i}"><svg class="ic"><use href="#i-x"/></svg>Não é</button>
+        <span class="conf">conf. ${t.conf}%</span>
+      </div>
+    </div>`).join("");
+  el.querySelectorAll("[data-tri]").forEach(b=>b.onclick=()=>{
+    DATA[SEC].triage.splice(+b.dataset.tri,1); toast("Vínculo atualizado"); render();
+  });
+}
+ 
+function countUp(){
+  document.querySelectorAll(".k-val").forEach(el=>{
+    const to=+el.dataset.to, sfx=el.dataset.suffix||""; let n=0; const step=Math.max(1,Math.round(to/18));
+    if(to===0){el.textContent="0"+sfx;return;}
+    const id=setInterval(()=>{ n+=step; if(n>=to){n=to;clearInterval(id);} el.textContent=n+sfx; },22);
+  });
+}
+ 
+let toastTimer;
+function toast(msg){
+  $("#toast-t").textContent=msg; const t=$("#toast"); t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),1900);
+}
+ 
+$("#seg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  $("#seg").querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); SEC=b.dataset.sec; render();
+});
+$("#nav").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  $("#nav").querySelectorAll("button").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active");
+  ["painel","cadastros","relatorios"].forEach(v=>$("#view-"+v).classList.toggle("hide", v!==b.dataset.view));
+});
+ 
+render();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWahaPhoneLookupCandidates, normalizePhoneFromChatId } from "../src/utils/phone";
+import { getWahaPhoneLookupCandidates, normalizePhoneFromChatId, phoneDigitsToE164 } from "../src/utils/phone";
 
 describe("normalizePhoneFromChatId", () => {
   it("extracts the phone from a regular WAHA chat id", () => {
@@ -46,5 +46,20 @@ describe("getWahaPhoneLookupCandidates", () => {
     const candidates = getWahaPhoneLookupCandidates("5511999999999");
 
     expect(new Set(candidates).size).toBe(candidates.length);
+  });
+});
+
+describe("phoneDigitsToE164", () => {
+  it("prefixes plain digits with +", () => {
+    expect(phoneDigitsToE164("5511999999999")).toBe("+5511999999999");
+  });
+
+  it("rejects empty strings", () => {
+    expect(phoneDigitsToE164("")).toBeNull();
+  });
+
+  it("rejects values with non-digit characters", () => {
+    expect(phoneDigitsToE164("+5511999999999")).toBeNull();
+    expect(phoneDigitsToE164("55 11 99999")).toBeNull();
   });
 });

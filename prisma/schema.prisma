@@ -1,3 +1,7 @@
+// Diário das Obras — data architecture v1 (multi-sector inspection platform).
+// Convention: English snake_case plural table names via @@map; Prisma models
+// PascalCase singular. See docs/arquitetura-dados-nova-versao-v1.md.
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -6,6 +10,10 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
 
 enum ConversationStep {
   MAIN_MENU
@@ -26,104 +34,495 @@ enum ConversationStep {
   AWAITING_TRAINING_FILE
 }
 
-model Usuario {
-  id        Int      @id @default(autoincrement()) @db.SmallInt
-  phoneE164 BigInt   @unique @map("PhoneE164") @db.BigInt
-  nome      String?  @map("Nome")
-  cargo     String?  @map("Cargo")
-  createdAt DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
-
-  empresas UserEmpresa[]
-  entradas Entrada[]
-
-  @@map("Usuarios")
+enum EntityType {
+  STANDARD
+  PERSON
+  MACHINE
+  ASSET
 }
 
-model Empresa {
-  id   BigInt  @id @default(autoincrement()) @db.BigInt
-  nome String?
-
-  usuarios UserEmpresa[]
-  entradas Entrada[]
-
-  @@map("Empresa")
+enum MentionSource {
+  CODE
+  AI
+  MANUAL
+  QR
 }
 
-model UserEmpresa {
-  userId    Int    @map("User_ID") @db.SmallInt
-  empresaId BigInt @map("Empresa_ID") @db.BigInt
-
-  usuario Usuario @relation(fields: [userId], references: [id], onDelete: Cascade)
-  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
-
-  @@id([userId, empresaId])
-  @@map("_UserEmpresa")
+enum AlertType {
+  PERSON_NOT_TRAINED
+  MACHINE_NO_INSPECTION
+  MACHINE_INSPECTION_EXPIRED
+  STANDARD_NOT_FOUND
 }
 
-model Entrada {
-  id                 BigInt   @id @default(autoincrement()) @db.BigInt
-  userId             Int      @map("User_id") @db.SmallInt
-  empresaId          BigInt?  @map("empresa_id") @db.BigInt
-  description        String?  @map("Description")
-  createdAt          DateTime @default(now()) @map("CreatedAt") @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
-  tipo               String?  @map("Tipo")
-  tipoServico        String?  @map("TipoServico")
-  numeroProcedimento String?  @map("NumeroProcedimento")
-
-  usuario     Usuario        @relation(fields: [userId], references: [id], onDelete: Restrict)
-  empresa     Empresa?       @relation(fields: [empresaId], references: [id], onDelete: SetNull)
-  media       EntradaMedia[]
-  treinamento Treinamento?
-
-  @@map("Entrada")
+enum AlertSeverity {
+  WARNING
+  CRITICAL
 }
 
-model EntradaMedia {
-  id        BigInt  @id @default(autoincrement()) @db.BigInt
-  mediaUrl  String  @map("MediaUrl")
-  mediaTipo String? @map("MediaTipo")
-  entradaId BigInt  @map("Entrada_id") @db.BigInt
-
-  entrada Entrada @relation(fields: [entradaId], references: [id], onDelete: Cascade)
-
-  @@map("_EntradaMedia")
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
 }
 
-model Treinamento {
-  id            Int      @id @default(autoincrement())
-  entradaId     BigInt   @unique @map("Entrada_id") @db.BigInt
-  tema          String   @map("Tema")
-  participantes String?  @map("Participantes")
-  inicio        DateTime @map("Inicio") @db.Timestamptz(6)
-  fim           DateTime @map("Fim") @db.Timestamptz(6)
-
-  entrada Entrada @relation(fields: [entradaId], references: [id], onDelete: Cascade)
-
-  @@map("Treinamento")
+enum CompetencyStatus {
+  TRAINED
+  PENDING
+  EXPIRED
 }
+
+enum PersonStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
+enum InspectionResult {
+  APPROVED
+  REJECTED
+}
+
+enum ItemResult {
+  OK
+  NOK
+  NA
+}
+
+// ---------------------------------------------------------------------------
+// Multi-sector configuration
+// ---------------------------------------------------------------------------
+
+model Sector {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assetTypes         AssetType[]
+  codePrefixes       CodePrefix[]
+  projects           Project[]
+  assets             Asset[]
+  standards          Standard[]
+  people             Person[]
+  machines           Machine[]
+  checklistTemplates ChecklistTemplate[]
+  entries            Entry[]
+
+  @@map("sectors")
+}
+
+model AssetType {
+  id           Int    @id @default(autoincrement())
+  sectorId     Int    @map("sector_id")
+  code         String
+  name         String
+  level        Int
+  parentTypeId Int?   @map("parent_type_id")
+
+  sector   Sector      @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  parent   AssetType?  @relation("AssetTypeHierarchy", fields: [parentTypeId], references: [id], onDelete: SetNull)
+  children AssetType[] @relation("AssetTypeHierarchy")
+  assets   Asset[]
+
+  @@unique([sectorId, code])
+  @@index([sectorId])
+  @@map("asset_types")
+}
+
+model CodePrefix {
+  id         Int        @id @default(autoincrement())
+  sectorId   Int?       @map("sector_id")
+  prefix     String
+  entityType EntityType @map("entity_type")
+
+  sector Sector? @relation(fields: [sectorId], references: [id], onDelete: Cascade)
+
+  @@unique([sectorId, prefix])
+  @@index([prefix])
+  @@map("code_prefixes")
+}
+
+// ---------------------------------------------------------------------------
+// Companies, projects and assets
+// ---------------------------------------------------------------------------
+
+model Company {
+  id        BigInt   @id @default(autoincrement())
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  userLinks UserCompany[]
+  projects  Project[]
+  people    Person[]
+  entries   Entry[]
+
+  @@map("companies")
+}
+
+model Project {
+  id         Int      @id @default(autoincrement())
+  companyId  BigInt   @map("company_id")
+  sectorId   Int      @map("sector_id")
+  code       String
+  name       String
+  status     String   @default("ACTIVE")
+  attributes Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sector   Sector    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  assets   Asset[]
+  machines Machine[]
+  people   Person[]
+  entries  Entry[]
+
+  @@unique([companyId, code])
+  @@index([sectorId])
+  @@map("projects")
+}
+
+model Asset {
+  id            Int     @id @default(autoincrement())
+  projectId     Int     @map("project_id")
+  sectorId      Int     @map("sector_id")
+  assetTypeId   Int     @map("asset_type_id")
+  parentAssetId Int?    @map("parent_asset_id")
+  code          String
+  name          String
+  attributes    Json?
+  qrcodeToken   String? @unique @map("qrcode_token")
+  active        Boolean @default(true)
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sector    Sector    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  assetType AssetType @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
+  parent    Asset?    @relation("AssetTree", fields: [parentAssetId], references: [id], onDelete: SetNull)
+  children  Asset[]   @relation("AssetTree")
+  entries   Entry[]
+
+  @@index([projectId])
+  @@index([parentAssetId])
+  @@map("assets")
+}
+
+// ---------------------------------------------------------------------------
+// Standards, people and competencies
+// ---------------------------------------------------------------------------
+
+model Standard {
+  id          Int     @id @default(autoincrement())
+  sectorId    Int     @map("sector_id")
+  code        String
+  title       String
+  description String?
+  version     String?
+  active      Boolean @default(true)
+  attributes  Json?
+
+  sector       Sector       @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  competencies Competency[]
+
+  @@unique([sectorId, code])
+  @@map("standards")
+}
+
+model Person {
+  id               Int          @id @default(autoincrement())
+  sectorId         Int          @map("sector_id")
+  companyId        BigInt?      @map("company_id")
+  projectId        Int?         @map("project_id")
+  name             String
+  registrationCode String?      @map("registration_code")
+  role             String?
+  status           PersonStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sector       Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  company      Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  project      Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  aliases      PersonAlias[]
+  competencies Competency[]
+  inspections  MachineInspection[] @relation("Inspector")
+
+  @@unique([sectorId, registrationCode])
+  @@index([projectId])
+  @@map("people")
+}
+
+model PersonAlias {
+  id       Int    @id @default(autoincrement())
+  personId Int    @map("person_id")
+  alias    String
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, alias])
+  @@index([alias])
+  @@map("person_aliases")
+}
+
+model Competency {
+  id             Int              @id @default(autoincrement())
+  personId       Int              @map("person_id")
+  standardId     Int              @map("standard_id")
+  status         CompetencyStatus
+  trainedAt      DateTime?        @map("trained_at") @db.Timestamptz(6)
+  validUntil     DateTime?        @map("valid_until") @db.Timestamptz(6)
+  certificateUrl String?          @map("certificate_url")
+
+  person   Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  standard Standard @relation(fields: [standardId], references: [id], onDelete: Restrict)
+
+  @@unique([personId, standardId])
+  @@map("competencies")
+}
+
+// ---------------------------------------------------------------------------
+// Machines, checklists and inspections
+// ---------------------------------------------------------------------------
+
+model Machine {
+  id         Int     @id @default(autoincrement())
+  sectorId   Int     @map("sector_id")
+  projectId  Int?    @map("project_id")
+  code       String
+  name       String
+  type       String?
+  status     String  @default("ACTIVE")
+  attributes Json?
+
+  sector      Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  project     Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  inspections MachineInspection[]
+
+  @@unique([sectorId, code])
+  @@map("machines")
+}
+
+model ChecklistTemplate {
+  id           Int    @id @default(autoincrement())
+  sectorId     Int    @map("sector_id")
+  application  String
+  name         String
+  validityDays Int?   @map("validity_days")
+
+  sector      Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  items       ChecklistItem[]
+  inspections MachineInspection[]
+
+  @@map("checklist_templates")
+}
+
+model ChecklistItem {
+  id          Int     @id @default(autoincrement())
+  templateId  Int     @map("template_id")
+  position    Int
+  description String
+  required    Boolean @default(true)
+
+  template          ChecklistTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  inspectionResults MachineInspectionItem[]
+
+  @@unique([templateId, position])
+  @@map("checklist_items")
+}
+
+model MachineInspection {
+  id                Int              @id @default(autoincrement())
+  machineId         Int              @map("machine_id")
+  templateId        Int              @map("template_id")
+  inspectedAt       DateTime         @map("inspected_at") @db.Timestamptz(6)
+  inspectorPersonId Int?             @map("inspector_person_id")
+  result            InspectionResult
+  validUntil        DateTime?        @map("valid_until") @db.Timestamptz(6)
+  notes             String?
+
+  machine   Machine                 @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  template  ChecklistTemplate       @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  inspector Person?                 @relation("Inspector", fields: [inspectorPersonId], references: [id], onDelete: SetNull)
+  items     MachineInspectionItem[]
+
+  @@index([machineId, inspectedAt])
+  @@map("machine_inspections")
+}
+
+model MachineInspectionItem {
+  id              Int        @id @default(autoincrement())
+  inspectionId    Int        @map("inspection_id")
+  checklistItemId Int        @map("checklist_item_id")
+  result          ItemResult
+  note            String?
+
+  inspection    MachineInspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  checklistItem ChecklistItem     @relation(fields: [checklistItemId], references: [id], onDelete: Restrict)
+
+  @@unique([inspectionId, checklistItemId])
+  @@map("machine_inspection_items")
+}
+
+// ---------------------------------------------------------------------------
+// Bot operators (WhatsApp users) — distinct from `people` (workforce cited in
+// captions); see docs §8.
+// ---------------------------------------------------------------------------
+
+model User {
+  id        Int      @id @default(autoincrement())
+  phoneE164 String   @unique @map("phone_e164")
+  name      String?
+  role      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  companies UserCompany[]
+  entries   Entry[]
+
+  @@map("users")
+}
+
+model UserCompany {
+  userId    Int    @map("user_id")
+  companyId BigInt @map("company_id")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, companyId])
+  @@map("user_companies")
+}
+
+// ---------------------------------------------------------------------------
+// Diary entries, mentions and alerts
+// ---------------------------------------------------------------------------
+
+model Entry {
+  id              BigInt   @id @default(autoincrement())
+  userId          Int      @map("user_id")
+  companyId       BigInt?  @map("company_id")
+  projectId       Int?     @map("project_id")
+  sectorId        Int?     @map("sector_id")
+  assetId         Int?     @map("asset_id")
+  category        String?
+  description     String?
+  serviceType     String?  @map("service_type")
+  procedureNumber String?  @map("procedure_number")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  company  Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  project  Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sector   Sector?       @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  asset    Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  media    EntryMedia[]
+  training Training?
+  mentions EntryMention[]
+  alerts   Alert[]
+
+  @@index([companyId, category, createdAt])
+  @@index([projectId, createdAt])
+  @@map("entries")
+}
+
+model EntryMedia {
+  id        BigInt  @id @default(autoincrement())
+  entryId   BigInt  @map("entry_id")
+  mediaUrl  String  @map("media_url")
+  mediaType String? @map("media_type")
+
+  entry Entry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@map("entry_media")
+}
+
+model Training {
+  id           Int      @id @default(autoincrement())
+  entryId      BigInt   @unique @map("entry_id")
+  topic        String
+  participants String?
+  startsAt     DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt       DateTime @map("ends_at") @db.Timestamptz(6)
+
+  entry Entry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@map("trainings")
+}
+
+/// Key table of the hybrid identification path: every entity detected in a
+/// caption becomes a link with provenance (source) and confidence.
+/// Polymorphic target (entityType + entityId) — no physical FK by design.
+model EntryMention {
+  id          Int           @id @default(autoincrement())
+  entryId     BigInt        @map("entry_id")
+  entityType  EntityType    @map("entity_type")
+  entityId    Int?          @map("entity_id")
+  source      MentionSource
+  confidence  Float?
+  matchedText String?       @map("matched_text")
+  confirmed   Boolean       @default(false)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  entry  Entry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  alerts Alert[]
+
+  @@index([entryId])
+  @@index([entityType, entityId])
+  @@index([source, confirmed])
+  @@map("entry_mentions")
+}
+
+/// Snapshot of a compliance problem at the moment of the entry — persisted,
+/// never recalculated (training/inspection status changes over time).
+model Alert {
+  id         Int           @id @default(autoincrement())
+  entryId    BigInt        @map("entry_id")
+  mentionId  Int?          @map("mention_id")
+  type       AlertType
+  severity   AlertSeverity
+  title      String
+  detail     String?
+  status     AlertStatus   @default(OPEN)
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt DateTime?     @map("resolved_at") @db.Timestamptz(6)
+
+  entry   Entry         @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  mention EntryMention? @relation(fields: [mentionId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([entryId])
+  @@map("alerts")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp conversation state (bot session machine)
+// ---------------------------------------------------------------------------
 
 model WhatsappConversationState {
-  id                               BigInt           @id @default(autoincrement()) @db.BigInt
-  chatId                           String           @unique @map("ChatId")
-  phoneE164                        String           @map("PhoneE164")
-  step                             ConversationStep @map("Step")
-  flowKey                          String?          @map("FlowKey")
-  stepKey                          String?          @map("StepKey")
-  flowData                         Json?            @map("FlowData")
-  selectedTipo                     String?          @map("SelectedTipo")
-  selectedEmpresaId                BigInt?          @map("SelectedEmpresaId") @db.BigInt
-  selectedTipoServico              String?          @map("SelectedTipoServico")
-  selectedNumeroProcedimento       String?          @map("SelectedNumeroProcedimento")
-  selectedTreinamentoTema          String?          @map("SelectedTreinamentoTema")
-  selectedTreinamentoParticipantes String?          @map("SelectedTreinamentoParticipantes")
-  selectedTreinamentoInicio        DateTime?        @map("SelectedTreinamentoInicio") @db.Timestamptz(6)
-  selectedTreinamentoFim           DateTime?        @map("SelectedTreinamentoFim") @db.Timestamptz(6)
-  selectedTrainingPhotoCount       Int?             @map("SelectedTrainingPhotoCount")
-  pendingEntradaId                 BigInt?          @map("PendingEntradaId") @db.BigInt
-  createdAt                        DateTime         @default(now()) @map("CreatedAt") @db.Timestamptz(6)
-  updatedAt                        DateTime         @updatedAt @map("UpdatedAt") @db.Timestamptz(6)
+  id                           BigInt           @id @default(autoincrement())
+  chatId                       String           @unique @map("chat_id")
+  phoneE164                    String           @map("phone_e164")
+  step                         ConversationStep
+  flowKey                      String?          @map("flow_key")
+  stepKey                      String?          @map("step_key")
+  flowData                     Json?            @map("flow_data")
+  selectedCategory             String?          @map("selected_category")
+  selectedCompanyId            BigInt?          @map("selected_company_id")
+  selectedServiceType          String?          @map("selected_service_type")
+  selectedProcedureNumber      String?          @map("selected_procedure_number")
+  selectedTrainingTopic        String?          @map("selected_training_topic")
+  selectedTrainingParticipants String?          @map("selected_training_participants")
+  selectedTrainingStartsAt     DateTime?        @map("selected_training_starts_at") @db.Timestamptz(6)
+  selectedTrainingEndsAt       DateTime?        @map("selected_training_ends_at") @db.Timestamptz(6)
+  selectedTrainingPhotoCount   Int?             @map("selected_training_photo_count")
+  pendingEntryId               BigInt?          @map("pending_entry_id")
+  createdAt                    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@map("WhatsappConversationState")
+  @@map("whatsapp_conversation_states")
 }

@@ -58,16 +58,12 @@ export function readNestedString(source: unknown, path: string[]): string | unde
   return typeof current === "string" && current.trim() ? current : undefined;
 }
 
-export function phoneDigitsToBigInt(phoneDigits: string): bigint | null {
+export function phoneDigitsToE164(phoneDigits: string): string | null {
   if (!/^\d+$/.test(phoneDigits)) {
     return null;
   }
 
-  try {
-    return BigInt(phoneDigits);
-  } catch {
-    return null;
-  }
+  return `+${phoneDigits}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

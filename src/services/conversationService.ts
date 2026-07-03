@@ -70,7 +70,10 @@ export class ConversationService {
     }
   }
 
-  private async processWebhook(chatId: string, webhook: WahaWebhook): Promise<void> {
+  private async processWebhook(
+    chatId: string,
+    webhook: WahaWebhook & { payload: WahaMessagePayload }
+  ): Promise<void> {
     const payload = webhook.payload;
     const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
     const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);

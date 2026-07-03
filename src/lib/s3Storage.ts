@@ -13,6 +13,10 @@ export class S3ObjectStorage implements ObjectStorage {
   ) {}
 
   static fromConfig(config: AppConfig): S3ObjectStorage {
+    if (!config.s3Bucket || !config.s3Region || !config.s3AccessKeyId || !config.s3SecretAccessKey) {
+      throw new Error("S3 not configured: missing ENDPOINT, REGION, ACCESS_KEY_ID, SECRET_ACCESS_KEY or S3_BUCKET");
+    }
+
     const client = new S3Client({
       region: config.s3Region,
       endpoint: config.s3Endpoint,

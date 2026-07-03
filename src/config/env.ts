@@ -13,6 +13,12 @@ export interface AppConfig {
   wahaBaseUrl: string;
   wahaApiKey: string;
   wahaSession: string;
+  panelApiToken: string | undefined;
+  /** Uma ou mais origens permitidas (separadas por vírgula no env). */
+  panelCorsOrigins: string[];
+  panelUserName: string | undefined;
+  panelUserRole: string | undefined;
+  panelTimezoneOffset: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -45,7 +51,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webhookSecret: env.WEBHOOK_SECRET,
     wahaBaseUrl: env.WAHA_BASE_URL!.replace(/\/+$/, ""),
     wahaApiKey: env.WAHA_API_KEY!,
-    wahaSession: env.WAHA_SESSION!
+    wahaSession: env.WAHA_SESSION!,
+    panelApiToken: env.PANEL_API_TOKEN,
+    panelCorsOrigins: (env.PANEL_CORS_ORIGIN ?? "http://localhost:5173")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    panelUserName: env.PANEL_USER_NAME,
+    panelUserRole: env.PANEL_USER_ROLE,
+    panelTimezoneOffset: env.PANEL_TZ_OFFSET ?? "-03:00"
   };
 }
 

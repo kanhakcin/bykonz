@@ -1,56 +1,127 @@
-# Diário das Obras — Painel do Gestor (frontend)
+# FrontEnd Architecture
 
-Painel web do gestor (cards **B7/B8** do backlog): visão do dia com KPIs, feed do diário
-vindo do WhatsApp, alertas de conformidade e triagem de vínculos da IA.
+Modern frontend application built with Vite, React 19, TanStack Router, TanStack Query, Zustand, and ShadCN UI.
 
-## Stack
+## Stack Overview
 
-- **React 19 + Vite + TypeScript** (SPA)
-- **Tailwind CSS 4** com tokens do design system
-- **TanStack Query** (dados), **React Router** (rotas)
-- Ícones **Lucide** (regra do design system: nunca emoji)
+| Technology      | Purpose                 |
+| --------------- | ----------------------- |
+| React 19        | UI Library              |
+| TanStack Router | File-based routing      |
+| TanStack Query  | Server state management |
+| Zustand         | Client state management |
+| ShadCN UI       | Component library       |
+| Tailwind CSS 4  | Styling                 |
+| Zod             | Schema validation       |
+| React Hook Form | Form management         |
+| i18next         | Internationalization    |
+| Biome           | Linting & Formatting    |
+| Vite            | Build tool              |
 
-## Design system
-
-A linguagem visual é o **IoTLog Design System (Bykonz)**, importado do Claude Design em
-[`../.claude/skills/iotlog-design/`](../.claude/skills/iotlog-design/) — leia o `README.md`
-de lá para as regras completas.
-
-- `src/styles/tokens.css` — tokens de cor (4 temas: light, dark, ocean-blue, sunset), tipografia e forma
-- `src/styles/components.css` — vocabulário de componentes (sidebar flutuante, card shell, botões, badges, KPI…)
-- Fontes: **SF Pro Display** (corpo, em `public/fonts/`) e **League Spartan** (chrome de UI, Google Fonts)
-- O botão de tema na sidebar circula light → dark → ocean-blue
-
-## Rodando
-
-```bash
-npm install
-npm run dev      # http://localhost:5173
-npm run build    # typecheck + build de produção
-```
-
-## Dados: API real ou mock
-
-As telas consomem apenas o contrato `DiaryApi` (`src/api/types.ts`, em inglês), que espelha
-a API REST do backend (`src/api/panelRouter.ts` no repo raiz) sobre a arquitetura de dados
-v1 (tabelas em inglês: `entries`, `entry_mentions` com source/confidence, `alerts` snapshot).
-
-- **Com `VITE_API_URL` definido** (ex.: `VITE_API_URL=http://localhost:8080 npm run dev`) —
-  usa a API real (`src/api/http.ts`). Login: qualquer e-mail + a senha é o `PANEL_API_TOKEN`
-  configurado no backend.
-- **Sem `VITE_API_URL`** — usa o mock (`src/api/mock.ts`, dados ilustrativos; qualquer
-  e-mail/senha entram).
-
-## Estrutura
+## Project Structure
 
 ```
 src/
-  api/          contrato + mock + hooks TanStack Query
-  components/   ui.tsx (primitivas), Sidebar, Shell
-  screens/      Login, Painel, Cadastros*, Relatorios*   (* placeholders)
-  providers.tsx tema, sessão e toast
-  styles/       tokens.css, components.css
+├── components/
+│   ├── ui/                  # ShadCN components
+│   ├── selects/             # Specialized Select components (example: CustomerSelect)
+│   ├── sidebar/, nav-actions/  # App shell (sidebar, theme/language/enterprise switchers)
+│   └── *.tsx                # Pattern components (graphs, stats, tables, forms, etc.)
+├── hooks/                   # Global reusable hooks (auth, permissions, example: use-customers-api)
+├── lib/
+│   ├── api/client.api.ts    # API client
+│   ├── config/
+│   │   ├── i18n.config.ts       # i18n configuration
+│   │   ├── routes.config.ts     # Route registry (MAIN_ROUTES, icons, permission map)
+│   │   └── translations/        # pt.json, en.json, es.json
+│   ├── const/, helpers/, utils/
+└── routes/
+    ├── _public/             # Public routes (auth, sso-redirect)
+    └── _private/            # Authenticated routes (permissions/, register/customers example)
 ```
 
-Observação de escopo: o painel não tem seletor de setor — o setor (civil, naval, …)
-virá da configuração do cliente via API.
+## Getting Started
+
+```bash
+# Install dependencies
+pnpm install
+
+# Start development server
+pnpm dev
+
+# Type checking
+pnpm check
+
+# Format code
+pnpm format
+
+# Lint code
+pnpm lint
+
+# Build for production
+pnpm build
+```
+
+## Development Workflow
+
+### Creating a New Route
+
+1. Create a folder in `src/routes/_private/`
+2. Add `index.tsx` for the main page
+3. For subpages like `add` or `details`, create a subfolder with its own `index.tsx` (DO NOT use `$id.tsx` or route variables). Route parameters must be handled via Search Params.
+4. Add subfolders: `@components/`, `@hooks/`, `@interface/`
+5. Use the Shell Pattern: `<Card>` → `<CardHeader>` → `<CardContent>`
+
+### API Integration
+
+1. Check if hook exists in `src/hooks/`
+2. If not, create a new hook using TanStack Query
+3. Use `api` from `@/lib/api/client`
+
+### Forms
+
+1. Define Zod schema in `@interface/`
+2. Create form hook in `@hooks/` using React Hook Form
+3. Use ShadCN form components
+
+### Translations
+
+1. Add keys to `src/lib/config/translations/pt.json` (default)
+2. Add translations to `en.json` and `es.json`
+3. Use `const { t } = useTranslation()` in components
+4. See `docs/i18n.md` for the key-reuse protocol — search before creating a new key
+
+## Available Commands
+
+| Command       | Description                   |
+| ------------- | ----------------------------- |
+| `pnpm dev`    | Start dev server on port 3000 |
+| `pnpm build`  | Build for production          |
+| `pnpm check`  | TypeScript type checking      |
+| `pnpm format` | Format code with Biome        |
+| `pnpm lint`   | Lint and fix with Biome       |
+
+## VSCode Extensions
+
+- **Inlang (Sherlock)** - i18n management
+- **Tailwind CSS IntelliSense** - Tailwind autocomplete
+- **Biome** - Code formatting
+
+## Component Patterns
+
+| Pattern                              | Reference File                           |
+| ------------------------------------- | ----------------------------------------- |
+| Statistics / KPI                      | `src/components/default-KPI.tsx`         |
+| Table w/ pagination                   | `src/components/default-table.tsx`       |
+| Form layout                           | `src/components/default-form-layout.tsx` |
+| Empty state                           | `src/components/default-empty-data.tsx`  |
+| Loading state                         | `src/components/default-loading.tsx`     |
+| Charts (area/bar/pizza/line/radial)   | `src/components/graph-*.tsx`             |
+
+## Example Module
+
+`src/routes/_private/register/customers/` demonstrates the full page pattern end-to-end: hub entry, list with search/pagination, add form, local `@interface`/`@hooks`/`@components`, paired with `src/hooks/use-customers-api.ts` and `src/components/selects/customer-select.tsx`. Copy this structure when starting a new module.
+
+The `permissions/` module (`roles/`, `users/`) ships as complete, working RBAC admin UI — reuse it as-is in new products.
+
+See `docs/` for the full set of architecture/convention references (`page-patterns.md`, `api-hooks.md`, `form-hooks.md`, `schemas-types.md`, `charts.md`, `i18n.md`, `checklist.md`, `available-resources.md`).

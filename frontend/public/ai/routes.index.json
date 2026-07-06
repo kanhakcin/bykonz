@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-07-03T15:07:57.507Z",
+  "totalRoutes": 9,
+  "routes": [
+    {
+      "id": "__private_permissions_",
+      "path": "/_private/permissions/",
+      "title": "permissions",
+      "embeddingKey": "__private_permissions_"
+    },
+    {
+      "id": "__private_permissions_roles_",
+      "path": "/_private/permissions/roles/",
+      "title": "role",
+      "embeddingKey": "__private_permissions_roles_"
+    },
+    {
+      "id": "__private_permissions_roles_edit_",
+      "path": "/_private/permissions/roles/edit/",
+      "title": "edit.role",
+      "embeddingKey": "__private_permissions_roles_edit_"
+    },
+    {
+      "id": "__private_permissions_roles_users_",
+      "path": "/_private/permissions/roles/users/",
+      "title": "role.users",
+      "embeddingKey": "__private_permissions_roles_users_"
+    },
+    {
+      "id": "__private_permissions_users_",
+      "path": "/_private/permissions/users/",
+      "title": "users.permissions",
+      "embeddingKey": "__private_permissions_users_"
+    },
+    {
+      "id": "__private_permissions_users_edit_",
+      "path": "/_private/permissions/users/edit/",
+      "title": "edit.user",
+      "embeddingKey": "__private_permissions_users_edit_"
+    },
+    {
+      "id": "__private_permissions_users_password_",
+      "path": "/_private/permissions/users/password/",
+      "title": "new.password",
+      "embeddingKey": "__private_permissions_users_password_"
+    },
+    {
+      "id": "__private_register_",
+      "path": "/_private/register/",
+      "title": "register",
+      "embeddingKey": "__private_register_"
+    },
+    {
+      "id": "__private_register_customers_",
+      "path": "/_private/register/customers/",
+      "title": "register.customers",
+      "embeddingKey": "__private_register_customers_"
+    }
+  ]
+}

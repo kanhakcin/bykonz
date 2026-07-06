@@ -1,0 +1,71 @@
+// Configurando o VS Code
+{
+  // Excluindo da busca estes arquivos
+  "search.useIgnoreFiles": true,
+  "search.exclude": {
+    "**/routeTree.gen.ts": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.pnpm-store": true,
+    "**/.gitignore": true,
+    "**/pnpm-lock.yaml": true,
+    "**/yarn.lock": true,
+    "**/package-lock.json": true,
+    "**pnpm*": true,
+    "**yarn*": true,
+    "**npm*": true
+  },
+  "files.watcherExclude": {
+    "**/routeTree.gen.ts": true,
+    "**/tsconfig.json": true
+  },
+  "files.readonlyInclude": {
+    "**/routeTree.gen.ts": true,
+    "**/tsconfig.json": true,
+    "**/vite.config.ts": true
+  },
+  "prettier.printWidth": 180,
+  "prettier.tabWidth": 2,
+  "prettier.useTabs": false,
+  "prettier.singleQuote": false,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.biome": "explicit"
+  },
+  "editor.defaultFormatter": "biomejs.biome",
+  "[javascript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "sherlock.previewLanguageTag": "pt",
+  "sherlock.extract": {
+    "autoHumanId": {
+      "enabled": true
+    }
+  },
+  "sherlock.editorColors": {
+    "info": {
+      "foreground": "#3b82f6",
+      "background": "rgba(59, 130, 246, 0.2)",
+      "border": "#3b82f6"
+    },
+    "error": {
+      "foreground": "#ef4444",
+      "background": "rgba(239, 68, 68, 0.2)",
+      "border": "#ef4444"
+    }
+  },
+  "claudeCode.preferredLocation": "panel"
+}

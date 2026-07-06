@@ -1,0 +1,171 @@
+{
+  "nodes": [
+    {
+      "id": "__private_permissions_",
+      "type": "page",
+      "label": "permissions"
+    },
+    {
+      "id": "__private_permissions_roles_",
+      "type": "page",
+      "label": "role"
+    },
+    {
+      "id": "__private_permissions_roles_edit_",
+      "type": "page",
+      "label": "edit.role"
+    },
+    {
+      "id": "__private_permissions_roles_users_",
+      "type": "page",
+      "label": "role.users"
+    },
+    {
+      "id": "__private_permissions_users_",
+      "type": "page",
+      "label": "users.permissions"
+    },
+    {
+      "id": "__private_permissions_users_edit_",
+      "type": "page",
+      "label": "edit.user"
+    },
+    {
+      "id": "__private_permissions_users_password_",
+      "type": "page",
+      "label": "new.password"
+    },
+    {
+      "id": "__private_register_",
+      "type": "page",
+      "label": "register"
+    },
+    {
+      "id": "__private_register_customers_",
+      "type": "page",
+      "label": "register.customers"
+    }
+  ],
+  "edges": [
+    {
+      "from": "__private_permissions_",
+      "to": "__private_permissions_users",
+      "relation": "child",
+      "description": "Gerenciamento de usuários do sistema"
+    },
+    {
+      "from": "__private_permissions_",
+      "to": "__private_permissions_roles",
+      "relation": "child",
+      "description": "Gerenciamento de perfis de acesso"
+    },
+    {
+      "from": "__private_permissions_roles_",
+      "to": "__private_permissions",
+      "relation": "parent",
+      "description": "Hub de permissões"
+    },
+    {
+      "from": "__private_permissions_roles_",
+      "to": "__private_permissions_roles_edit",
+      "relation": "child",
+      "description": "Edição de perfil de acesso"
+    },
+    {
+      "from": "__private_permissions_roles_",
+      "to": "__private_permissions_roles_users",
+      "relation": "child",
+      "description": "Usuários do perfil"
+    },
+    {
+      "from": "__private_permissions_roles_edit_",
+      "to": "__private_permissions_roles",
+      "relation": "parent",
+      "description": "Lista de perfis de acesso"
+    },
+    {
+      "from": "__private_permissions_roles_edit_",
+      "to": "__private_permissions_roles_users",
+      "relation": "sibling",
+      "description": "Usuários do perfil"
+    },
+    {
+      "from": "__private_permissions_roles_users_",
+      "to": "__private_permissions_roles",
+      "relation": "parent",
+      "description": "Lista de perfis de acesso"
+    },
+    {
+      "from": "__private_permissions_roles_users_",
+      "to": "__private_permissions_roles_edit",
+      "relation": "sibling",
+      "description": "Edição do perfil"
+    },
+    {
+      "from": "__private_permissions_roles_users_",
+      "to": "__private_permissions_users",
+      "relation": "sibling",
+      "description": "Lista de todos os usuários"
+    },
+    {
+      "from": "__private_permissions_users_",
+      "to": "__private_permissions",
+      "relation": "parent",
+      "description": "Hub de permissões"
+    },
+    {
+      "from": "__private_permissions_users_",
+      "to": "__private_permissions_users_edit",
+      "relation": "child",
+      "description": "Edição de usuário"
+    },
+    {
+      "from": "__private_permissions_users_",
+      "to": "__private_permissions_users_password",
+      "relation": "child",
+      "description": "Reset de senha"
+    },
+    {
+      "from": "__private_permissions_users_",
+      "to": "__private_permissions_roles",
+      "relation": "sibling",
+      "description": "Perfis de acesso"
+    },
+    {
+      "from": "__private_permissions_users_edit_",
+      "to": "__private_permissions_users",
+      "relation": "parent",
+      "description": "Lista de usuários"
+    },
+    {
+      "from": "__private_permissions_users_edit_",
+      "to": "__private_permissions_users_password",
+      "relation": "sibling",
+      "description": "Reset de senha do usuário"
+    },
+    {
+      "from": "__private_permissions_users_password_",
+      "to": "__private_permissions_users",
+      "relation": "parent",
+      "description": "Lista de usuários"
+    },
+    {
+      "from": "__private_permissions_users_password_",
+      "to": "__private_permissions_users_edit",
+      "relation": "sibling",
+      "description": "Edição do usuário"
+    },
+    {
+      "from": "__private_register_",
+      "to": "__private_register_customers",
+      "relation": "child",
+      "description": "Cadastro de clientes"
+    },
+    {
+      "from": "__private_register_customers_",
+      "to": "__private_register",
+      "relation": "parent",
+      "description": "Hub de cadastros"
+    }
+  ]
+}

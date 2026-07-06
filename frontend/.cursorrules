@@ -1,0 +1,303 @@
+# Project Rules
+
+## Stack
+
+| Categoria | Tecnologia | Versao |
+|-----------|------------|--------|
+| Runtime | Node.js | >=24 |
+| Framework | React | 19 |
+| Bundler | Vite | 7 |
+| Router | TanStack Router | 1.x |
+| Data Fetching | TanStack Query | 5.x |
+| State | Zustand | 5.x |
+| UI Library | ShadCN UI + Radix | - |
+| Styling | TailwindCSS | 4.x |
+| Forms | react-hook-form + zod | 7.x / 3.x |
+| i18n | react-i18next | 16.x |
+| Linter/Formatter | Biome | 2.x |
+| Charts | Recharts + ECharts | 2.x / 6.x |
+
+## Regras Criticas
+
+### 1. Internacionalizacao (i18n)
+
+- TODA string de UI deve usar `t('chave')` do `react-i18next`
+- SEMPRE adicionar chaves nos 3 arquivos: `pt.json`, `en.json`, `es.json` em `src/config/translations/`
+- Use grep para verificar se a chave ja existe antes de criar
+
+```tsx
+const { t } = useTranslation();
+<h1>{t('page.title')}</h1>
+<Input placeholder={t('search.placeholder')} />
+<p>{t('welcome.message', { name: 'User' })}</p>
+```
+
+### 2. Formatacao de Datas
+
+- SEMPRE usar `@/lib/formatDate` para formatacao
+- NUNCA importar `format` diretamente do `date-fns`
+
+```tsx
+import { formatDate, formatDistanceToNow } from '@/lib/formatDate';
+formatDate(date, 'dd/MM/yyyy');
+```
+
+### 3. Estado Global
+
+- Usar Zustand com middleware `persist` para persistencia
+- NUNCA usar `localStorage.setItem` diretamente
+
+```tsx
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+
+export const useMyStore = create<MyStore>()(
+  persist(
+    (set) => ({
+      value: '',
+      setValue: (v) => set({ value: v }),
+    }),
+    { name: 'my-store-key' },
+  ),
+);
+```
+
+**Stores globais disponiveis:**
+
+| Hook | Proposito |
+|------|-----------|
+| `useAuth` | Token JWT, usuario, login |
+| `useEnterpriseFilter` | Empresa selecionada globalmente (`idEnterprise`) |
+| `usePermissions` | Cache de permissoes do usuario |
+| `useFavorites` | Links favoritos |
+| `useSidebar` | Estado expandido/colapsado |
+
+### 4. UI & Estilizacao
+
+- Use ShadCN UI (`src/components/ui`) — NUNCA tags HTML puras estilizadas
+- Para cores de graficos: `getChartColor(index)` de `src/components/ui/chart`
+- NUNCA use `mx-auto` no ChartContainer
+- Multiplique o index por 2 ou 3 para maior contraste: `getChartColor(index * 3)`
+
+### 5. Roteamento
+
+- Rotas baseadas em diretorios com `index.tsx` obrigatorio
+- PROIBIDO usar `.` para criar rotas e PROIBIDO usar `$` para parametros de rota (use Search Params)
+- Toda sub rota DEVE ser uma pasta com um arquivo `index.tsx` dentro
+
+| Valido | Invalido |
+|--------|----------|
+| `index.tsx` | `$id.tsx` |
+| `add/index.tsx` | `edit.$id.tsx` |
+| `details/index.tsx` (com `?id=xxx`) | `details.$id.tsx` |
+
+```tsx
+const searchSchema = z.object({
+  id: z.string().optional(),
+  page: z.number().optional().default(1),
+  size: z.number().optional().default(20),
+});
+
+export const Route = createFileRoute('/_private/register/feature/')({
+  component: FeaturePage,
+  validateSearch: (search: Record<string, unknown>) => searchSchema.parse(search),
+});
+
+const { id, page } = useSearch({ from: '/_private/register/feature/' });
+```
+
+## Componentes Obrigatorios
+
+| Situacao | Componente | Import |
+|----------|-----------|--------|
+| Dados vazios (`data.length === 0`) | `<DefaultEmptyData />` | `@/components/default-empty-data` |
+| Loading / requisicao pendente | `<DefaultLoading />` | `@/components/default-loading` |
+| Layout de formulario | `<DefaultFormLayout />` | `@/components/default-form-layout` |
+
+## Estrutura de Pagina
+
+```tsx
+<Card>
+  <CardHeader title={t("titulo")}>{/* Acoes: botoes, filtros */}</CardHeader>
+  <CardContent>{/* Conteudo */}</CardContent>
+  <CardFooter layout="multi | single">{/* Paginacao */}</CardFooter>
+</Card>
+```
+
+## Componentes Comuns (nao paginas)
+
+- NUNCA usar Card.tsx em componentes comuns
+- Usar `<Item>`, `<ItemTitle>`, `<ItemDescription>` de `src/components/ui/item.tsx`
+- Graficos sao componentes comuns: usar `Item` — nunca `Card`
+
+## Padroes React
+
+### Declaracao de Componentes
+
+Sempre use `function` declarations. Evite arrow functions e `React.FC`.
+
+```tsx
+// CORRETO
+function UserCard({ user }: UserCardProps) {
+  return <Item>...</Item>;
+}
+
+// EVITAR
+const UserCard = ({ user }: UserCardProps) => { ... };
+```
+
+### Ordem Interna do Componente
+
+```tsx
+function MyComponent({ prop1 }: MyComponentProps) {
+  // 1. Hooks de contexto/router
+  const { t } = useTranslation();
+  const navigate = Route.useNavigate();
+
+  // 2. Hooks de estado global (Zustand)
+  const { idEnterprise } = useEnterpriseFilter();
+
+  // 3. Hooks de dados (TanStack Query)
+  const { data, isLoading } = useFeature();
+
+  // 4. Estado local
+  const [isOpen, setIsOpen] = useState(false);
+
+  // 5. Valores derivados / useMemo
+  const filtered = useMemo(() => data?.filter(x => x.active), [data]);
+
+  // 6. Callbacks
+  const handleSelect = useCallback((item: Item) => { ... }, []);
+
+  // 7. Effects (usar com moderacao)
+
+  // 8. Early returns (loading → error → empty → success)
+  if (isLoading) return <DefaultLoading />;
+  if (!data?.length) return <DefaultEmptyData />;
+
+  // 9. Render
+  return ( ... );
+}
+```
+
+## Hooks de API (Padrao TanStack Query)
+
+```tsx
+// src/hooks/use-{feature}-api.ts
+export const featureKeys = {
+  all: ["feature"] as const,
+  lists: () => [...featureKeys.all, "list"] as const,
+  list: (filters?: Record<string, unknown>) => [...featureKeys.lists(), filters] as const,
+  details: () => [...featureKeys.all, "detail"] as const,
+  detail: (id: string) => [...featureKeys.details(), id] as const,
+};
+
+export function useFeature() {
+  return useQuery({
+    queryKey: featureKeys.lists(),
+    queryFn: async () => (await api.get("/feature/list")).data,
+  });
+}
+
+export function useFeaturesApi() {
+  const queryClient = useQueryClient();
+
+  const createFeature = useMutation({
+    mutationFn: (data) => api.post("/feature", data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: featureKeys.lists() }),
+  });
+
+  return { createFeature };
+}
+```
+
+## Hooks de Formulario (react-hook-form + zod)
+
+- Criar em `@hooks/use-{feature}-form.ts` da rota
+- Usar `zodResolver` para validacao
+- Componente de form usa `useFormContext` (nao recebe form por props)
+- Layout usa `DefaultFormLayout` com array de `sections`
+
+## Estado — Quando Usar Cada Ferramenta
+
+| Tipo | Ferramenta | Exemplo |
+|------|------------|---------|
+| Server State | TanStack Query | Lista de usuarios, detalhes |
+| Form State | react-hook-form | Campos de formulario |
+| UI Local | useState | Modal aberto, tab ativa |
+| UI Global | Zustand | Sidebar, tema, filtro global |
+| Persistente | Zustand + persist | Token, preferencias |
+
+## Anti-Patterns Proibidos
+
+- `localStorage.setItem` direto → usar Zustand persist
+- `useEffect` para estado derivado → usar `useMemo`
+- `fetch` em `useEffect` → usar TanStack Query
+- Importar `format` do `date-fns` → usar `@/lib/formatDate`
+- Props drilling por 3+ niveis → usar Zustand ou Context
+- Criar hook sem verificar se ja existe em `src/hooks/`
+- Strings hardcoded em UI → usar `t('chave')` i18n
+- Usar `Card` em componentes comuns → usar `Item`
+- Usar `mx-auto` no `ChartContainer`
+- Usar `.` ou `$` em nomes de arquivos de rota
+
+## Antes de Criar Hooks
+
+- VERIFICAR se ja existe em `src/hooks/` (258 hooks globais)
+- Hooks de API reutilizaveis: `src/hooks/use-{feature}-api.ts`
+- Hooks especificos de rota: `@hooks/use-{feature}-form.ts`
+
+## Selects — 68 Componentes Prontos
+
+Verificar `src/components/selects/` antes de criar um novo. Ja encapsulam API, loading e erro.
+
+Props padrao: `mode` (`'single' | 'multi'`), `value`, `onChange`, `disabled?`, `clearable?`
+
+## Estrutura de Pastas da Rota
+
+```
+src/routes/_private/{module}/
+├── index.tsx           # Pagina principal
+├── add/
+│   └── index.tsx       # Pagina de criacao/edicao
+├── details/
+│   └── index.tsx       # Pagina de detalhe (opcional)
+├── @components/        # Componentes especificos da rota
+├── @consts/            # Valores fixos, enums
+├── @hooks/             # Hooks especificos
+├── @interface/         # Types, Interfaces, Schemas Zod
+└── @utils/             # Funcoes auxiliares
+```
+
+## ShadCN CLI
+
+```bash
+pnpm dlx shadcn@latest add <component>
+```
+
+## Antes de Commitar
+
+```bash
+pnpm run format  # Biome
+pnpm run check   # TypeScript
+```
+
+---
+
+## Documentacao Detalhada (sob demanda)
+
+Para padroes detalhados com exemplos completos, leia os docs conforme o cenario:
+
+| Cenario                                         | Documento                                      |
+| ----------------------------------------------- | ---------------------------------------------- |
+| Iniciar nova feature / criar pastas             | `docs/route-structure.md`, `docs/checklist.md` |
+| Criar pagina de listagem ou formulario          | `docs/page-patterns.md`                        |
+| Criar hooks de API (TanStack Query)             | `docs/api-hooks.md`                            |
+| Criar formularios (react-hook-form)             | `docs/form-hooks.md`                           |
+| Criar schemas Zod, interfaces, consts           | `docs/schemas-types.md`                        |
+| Gerenciar estado global (Zustand)               | `docs/state-management.md`                     |
+| Traducoes i18n ou formatacao de datas           | `docs/i18n-dates.md`                           |
+| Padroes de componentes React                    | `docs/react-patterns.md`                       |
+| Graficos (Recharts, cores, tipos)               | `docs/charts.md`                               |
+| Buscar selects, hooks ou componentes existentes | `docs/available-resources.md`                  |
+| Consultar tech stack e versoes                  | `docs/stack.md`                                |

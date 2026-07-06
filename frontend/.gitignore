@@ -1,24 +1,41 @@
-# Logs
-logs
-*.log
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
+.env
+.env.prod
+.env.dev
+.env.intranet
+.lock
+
+debug.log*
+*-lock.json
+
 dist
 dist-ssr
 *.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+*pnpm-store
+count.txt
+.nitro
+.tanstack
+.wrangler
+.claude/scheduled_tasks.lock
+missing_translations_keys.txt

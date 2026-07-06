@@ -25,10 +25,6 @@ export const INCLUDE_ONLY_ACTION_OPTIONS = {
   incluir: "1"
 };
 
-export function isMainMenuSelection(text: string): boolean {
-  return text === DIARIO_OBRA_REPORT_OPTION || text in TIPO_OPTIONS;
-}
-
 export function isEntryTipo(value: string | null | undefined): value is EntryTipo {
   return typeof value === "string" && (ENTRY_TIPOS as readonly string[]).includes(value);
 }

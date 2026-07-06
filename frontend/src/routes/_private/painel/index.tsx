@@ -3,10 +3,13 @@ import { Bell, CheckCircle2, Images, Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import DefaultEmptyData from '@/components/default-empty-data';
-import DefaultLoading from '@/components/default-loading';
 import { DefaultKPI } from '@/components/default-KPI';
+import DefaultLoading from '@/components/default-loading';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { DataSelect } from '@/components/ui/data-select';
 import { useDiaryDay } from '@/hooks/use-diary-api';
+import { useProjectFilter } from '@/hooks/use-project-filter';
+import { useProjectsSelect } from '@/hooks/use-projects-api';
 import { AlertsPanel } from '@/routes/_private/painel/@components/alerts-panel';
 import { EntryCard } from '@/routes/_private/painel/@components/entry-card';
 import { TriagePanel } from '@/routes/_private/painel/@components/triage-panel';
@@ -17,6 +20,9 @@ export const Route = createFileRoute('/_private/painel/')({
 
 function PainelPage() {
   const { t } = useTranslation();
+  const { projectId, setProjectId } = useProjectFilter();
+
+  const projectsQuery = useProjectsSelect();
 
   // Diário considera o dia útil como 00h-24h no fuso de Brasília (UTC-3).
   const today = useMemo(() => {
@@ -24,11 +30,20 @@ function PainelPage() {
     return now.toISOString().slice(0, 10);
   }, []);
 
-  const { data: day, isLoading, isError } = useDiaryDay(today);
+  const { data: day, isLoading, isError } = useDiaryDay(today, projectId);
 
   return (
     <Card>
-      <CardHeader title={t('painel.title')} />
+      <CardHeader title={t('painel.title')}>
+        <DataSelect
+          className="sm:max-w-72"
+          placeholder={t('select.placeholder')}
+          searchPlaceholder={t('search')}
+          value={projectId ?? day?.project.id}
+          onChange={(value) => setProjectId(typeof value === 'number' ? value : undefined)}
+          query={projectsQuery}
+        />
+      </CardHeader>
       <CardContent>
         {isLoading ? (
           <DefaultLoading />

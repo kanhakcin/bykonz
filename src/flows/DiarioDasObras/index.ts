@@ -6,7 +6,7 @@ import type {
   FlowData,
   FlowDefinition,
   FlowHandleInput,
-  FlowStep,
+  ObraRecord,
   SaveConversationStateInput
 } from "../types";
 import {
@@ -23,10 +23,18 @@ import {
   actionMenuText,
   INCLUDE_ONLY_ACTION_OPTIONS,
   isEntryTipo,
-  isMainMenuSelection,
   mainMenuText,
   TIPO_OPTIONS
 } from "./menu";
+import {
+  isObraFlowStepKey,
+  isTrocarObraCommand,
+  noObrasText,
+  obraMenuText,
+  obraSelecionadaText,
+  OBRA_FLOW_STEPS,
+  withObraHeader
+} from "./obra";
 import {
   isMaterialFlowStepKey,
   MATERIAL_FLOW_DATA_KEYS,
@@ -53,45 +61,48 @@ import {
 } from "./treinamento";
 import { DIARIO_DAS_OBRAS_FLOW_KEY, type EntryTipo } from "./types";
 
+const NENHUMA_EMPRESA_TEXT = "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador.";
+
 export class DiarioDasObrasFlow implements FlowDefinition {
   readonly key = DIARIO_DAS_OBRAS_FLOW_KEY;
 
   constructor(private readonly deps: ConversationServiceDeps) {}
 
+  /**
+   * Reinicia para o menu principal preservando a obra ativa: trocar de acao
+   * nao deve fazer o usuario escolher a obra de novo no mesmo dia.
+   */
   async resetToMenu(chatId: string, phoneE164: string): Promise<void> {
-    await this.saveState({
-      chatId,
-      phoneE164,
-      step: "MAIN_MENU",
-      selectedTipo: null,
-      selectedEmpresaId: null,
-      selectedTipoServico: null,
-      selectedNumeroProcedimento: null,
-      selectedTreinamentoTema: null,
-      selectedTreinamentoParticipantes: null,
-      selectedTreinamentoInicio: null,
-      selectedTreinamentoFim: null,
-      selectedTrainingPhotoCount: null,
-      pendingEntradaId: null
-    });
-    await this.deps.messaging.sendText(chatId, mainMenuText());
-  }
+    const existing = await this.deps.store.getState(chatId);
+    const state = existing ? hydrateDiarioState(existing) : null;
 
-  async start(input: FlowHandleInput): Promise<void> {
-    if (!isMainMenuSelection(input.text)) {
-      await this.deps.messaging.sendText(input.chatId, mainMenuText());
+    if (state?.selectedObraId && state.selectedObraNome) {
+      await this.goToMainMenu(chatId, phoneE164, state.selectedObraId, state.selectedObraNome);
       return;
     }
 
-    await this.handle(input);
+    await this.resolveObraThenStart(chatId, phoneE164);
+  }
+
+  async start(input: FlowHandleInput): Promise<void> {
+    await this.resolveObraThenStart(input.chatId, input.phoneE164);
   }
 
   async handle(input: FlowHandleInput): Promise<void> {
     const state = hydrateDiarioState(input.state);
 
+    // "trocar obra" funciona a qualquer momento, exceto durante a propria selecao de obra.
+    if (isTrocarObraCommand(input.text) && !isObraFlowStepKey(state.stepKey)) {
+      await this.resolveObraForSwitch(input.chatId, input.phoneE164);
+      return;
+    }
+
     switch (state.stepKey ?? state.step) {
+      case OBRA_FLOW_STEPS.selectObra:
+        await this.handleObraSelection(input.chatId, input.phoneE164, input.text);
+        return;
       case "MAIN_MENU":
-        await this.handleMainMenu(input.chatId, input.phoneE164, input.user.id, input.text);
+        await this.handleMainMenu(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case "ACTION_MENU":
         await this.handleActionMenu(input.chatId, input.phoneE164, input.user.id, state, input.text);
@@ -136,7 +147,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         await this.handleReportDate(input.chatId, input.phoneE164, state, input.text);
         return;
       case "SELECT_EMPRESA_FOR_TRAINING":
-        await this.handleEmpresaSelectionForTraining(input.chatId, input.phoneE164, input.user.id, input.text);
+        await this.handleEmpresaSelectionForTraining(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case "AWAITING_TRAINING_TEMA":
         await this.handleTrainingTema(input.chatId, input.phoneE164, state, input.text);
@@ -158,24 +169,137 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
   }
 
-  private async handleMainMenu(chatId: string, phoneE164: string, userId: number, text: string): Promise<void> {
+  // ---- Obra (etapa inicial, antes de qualquer menu) ------------------------
+
+  private async resolveObraThenStart(chatId: string, phoneE164: string): Promise<void> {
+    const obras = await this.deps.store.findObrasAtivas();
+    if (obras.length === 0) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(chatId, noObrasText());
+      return;
+    }
+
+    if (obras.length === 1) {
+      await this.goToMainMenu(chatId, phoneE164, obras[0].id, obras[0].nome, obraSelecionadaText(obras[0].nome));
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA",
+      stepKey: OBRA_FLOW_STEPS.selectObra,
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedObraId: null,
+      selectedObraNome: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, obraMenuText(obras));
+  }
+
+  /** "trocar obra": mesma pergunta, mas sem apagar o cadastro do usuario alem do contexto de obra. */
+  private async resolveObraForSwitch(chatId: string, phoneE164: string): Promise<void> {
+    const obras = await this.deps.store.findObrasAtivas();
+    if (obras.length === 0) {
+      await this.deps.messaging.sendText(chatId, noObrasText());
+      return;
+    }
+
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "SELECT_EMPRESA",
+      stepKey: OBRA_FLOW_STEPS.selectObra,
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedObraId: null,
+      selectedObraNome: null,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+    await this.deps.messaging.sendText(chatId, obraMenuText(obras));
+  }
+
+  private async handleObraSelection(chatId: string, phoneE164: string, text: string): Promise<void> {
+    const obras = await this.deps.store.findObrasAtivas();
+    const selectedIndex = Number(text) - 1;
+    const obra = Number.isInteger(selectedIndex) ? obras[selectedIndex] : undefined;
+    if (!obra) {
+      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${obraMenuText(obras)}`);
+      return;
+    }
+
+    await this.goToMainMenu(chatId, phoneE164, obra.id, obra.nome, obraSelecionadaText(obra.nome));
+  }
+
+  /** Ponto unico de retorno ao menu principal — sempre dentro de uma obra ja definida. */
+  private async goToMainMenu(
+    chatId: string,
+    phoneE164: string,
+    obraId: number,
+    obraNome: string,
+    prefixText?: string
+  ): Promise<void> {
+    await this.saveState({
+      chatId,
+      phoneE164,
+      step: "MAIN_MENU",
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedObraId: obraId,
+      selectedObraNome: obraNome,
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null,
+      selectedTreinamentoTema: null,
+      selectedTreinamentoParticipantes: null,
+      selectedTreinamentoInicio: null,
+      selectedTreinamentoFim: null,
+      selectedTrainingPhotoCount: null,
+      pendingEntradaId: null
+    });
+
+    const menu = mainMenuText();
+    await this.deps.messaging.sendText(chatId, prefixText ? `${prefixText}\n\n${menu}` : withObraHeader(obraNome, menu));
+  }
+
+  // ---- Menu principal e categorias ------------------------------------------
+
+  private async handleMainMenu(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const obraId = state.selectedObraId;
+    const obraNome = state.selectedObraNome;
+    if (!obraId || !obraNome) {
+      await this.resolveObraThenStart(chatId, phoneE164);
+      return;
+    }
+
     if (text === DIARIO_OBRA_REPORT_OPTION) {
-      await this.handleConsultaForTipo(chatId, phoneE164, userId, DIARIO_OBRA_REPORT_TIPO);
+      await this.handleConsultaForTipo(chatId, phoneE164, userId, state, DIARIO_OBRA_REPORT_TIPO);
       return;
     }
 
     const tipo = TIPO_OPTIONS[text];
     if (!tipo) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${mainMenuText()}`);
+      await this.sendWithHeader(chatId, obraNome, `Opcao invalida.\n\n${mainMenuText()}`);
       return;
     }
 
     if (tipo === "Treinamento") {
-      await this.resolveEmpresaForTraining(chatId, phoneE164, userId);
+      await this.resolveEmpresaForTraining(chatId, phoneE164, userId, obraId, obraNome);
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "ACTION_MENU",
@@ -186,7 +310,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       pendingEntradaId: null
     });
 
-    await this.deps.messaging.sendText(chatId, actionMenuText(tipo));
+    await this.sendWithHeader(chatId, obraNome, actionMenuText(tipo));
   }
 
   private async handleActionMenu(
@@ -197,18 +321,18 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     text: string
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo) {
+    if (!tipo || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     if (usesIncludeOnlyActionMenu(tipo)) {
       if (text === INCLUDE_ONLY_ACTION_OPTIONS.incluir) {
-        await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
+        await this.resolveEmpresaForAdd(chatId, phoneE164, userId, state, tipo);
         return;
       }
 
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
       return;
     }
 
@@ -218,35 +342,37 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     if (text === ACTION_OPTIONS.incluir) {
-      await this.resolveEmpresaForAdd(chatId, phoneE164, userId, tipo);
+      await this.resolveEmpresaForAdd(chatId, phoneE164, userId, state, tipo);
       return;
     }
 
-    await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+    await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
   }
 
   private async resolveEmpresaForAdd(
     chatId: string,
     phoneE164: string,
     userId: number,
+    state: ConversationStateRecord,
     tipo: EntryTipo
   ): Promise<void> {
+    const obraId = state.selectedObraId!;
+    const obraNome = state.selectedObraNome!;
+
     const empresas = await this.deps.store.findEmpresasByUser(userId);
     if (empresas.length === 0) {
       await this.deps.store.clearState(chatId);
-      await this.deps.messaging.sendText(
-        chatId,
-        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
-      );
+      await this.deps.messaging.sendText(chatId, NENHUMA_EMPRESA_TEXT);
       return;
     }
 
     if (empresas.length === 1) {
-      await this.startAddForEmpresa(chatId, phoneE164, tipo, empresas[0].id);
+      await this.askServiceType(chatId, phoneE164, tipo, empresas[0].id, obraId, obraNome);
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "SELECT_EMPRESA",
@@ -256,7 +382,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+    await this.sendWithHeader(chatId, obraNome, this.empresaMenuText(empresas));
   }
 
   private async handleEmpresaSelection(
@@ -267,7 +393,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     text: string
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo) {
+    if (!tipo || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -276,18 +402,20 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
       return;
     }
 
-    await this.startAddForEmpresa(chatId, phoneE164, tipo, empresa.id);
+    await this.askServiceType(chatId, phoneE164, tipo, empresa.id, state.selectedObraId, state.selectedObraNome);
   }
 
-  private async startAddForEmpresa(
+  private async askServiceType(
     chatId: string,
     phoneE164: string,
     tipo: EntryTipo,
-    empresaId: bigint
+    empresaId: bigint,
+    obraId: number,
+    obraNome: string
   ): Promise<void> {
     if (tipo === MATERIAL_TIPO) {
       await this.saveState({
@@ -297,12 +425,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         stepKey: MATERIAL_FLOW_STEPS.awaitingOs,
         selectedTipo: tipo,
         selectedEmpresaId: empresaId,
+        selectedObraId: obraId,
+        selectedObraNome: obraNome,
         selectedTipoServico: null,
         selectedNumeroProcedimento: null,
         pendingEntradaId: null,
         flowData: {}
       });
-      await this.deps.messaging.sendText(chatId, materialOsPromptText());
+      await this.sendWithHeader(chatId, obraNome, materialOsPromptText());
       return;
     }
 
@@ -312,41 +442,31 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       step: "AWAITING_SERVICE_TYPE",
       selectedTipo: tipo,
       selectedEmpresaId: empresaId,
+      selectedObraId: obraId,
+      selectedObraNome: obraNome,
       selectedTipoServico: null,
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, tipoServicoMenuText(tipo));
+    await this.sendWithHeader(chatId, obraNome, tipoServicoMenuText(tipo));
   }
 
-  private async resolveEmpresaForTraining(chatId: string, phoneE164: string, userId: number): Promise<void> {
+  private async resolveEmpresaForTraining(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    obraId: number,
+    obraNome: string
+  ): Promise<void> {
     const empresas = await this.deps.store.findEmpresasByUser(userId);
     if (empresas.length === 0) {
       await this.deps.store.clearState(chatId);
-      await this.deps.messaging.sendText(
-        chatId,
-        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
-      );
+      await this.deps.messaging.sendText(chatId, NENHUMA_EMPRESA_TEXT);
       return;
     }
 
     if (empresas.length === 1) {
-      await this.saveState({
-        chatId,
-        phoneE164,
-        step: "AWAITING_TRAINING_TEMA",
-        selectedTipo: "Treinamento",
-        selectedEmpresaId: empresas[0].id,
-        selectedTipoServico: null,
-        selectedNumeroProcedimento: null,
-        selectedTreinamentoTema: null,
-        selectedTreinamentoParticipantes: null,
-        selectedTreinamentoInicio: null,
-        selectedTreinamentoFim: null,
-        selectedTrainingPhotoCount: null,
-        pendingEntradaId: null
-      });
-      await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+      await this.startTrainingForEmpresa(chatId, phoneE164, empresas[0].id, obraId, obraNome);
       return;
     }
 
@@ -356,6 +476,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       step: "SELECT_EMPRESA_FOR_TRAINING",
       selectedTipo: "Treinamento",
       selectedEmpresaId: null,
+      selectedObraId: obraId,
+      selectedObraNome: obraNome,
       selectedTipoServico: null,
       selectedNumeroProcedimento: null,
       selectedTreinamentoTema: null,
@@ -365,29 +487,47 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedTrainingPhotoCount: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+    await this.sendWithHeader(chatId, obraNome, this.empresaMenuText(empresas));
   }
 
   private async handleEmpresaSelectionForTraining(
     chatId: string,
     phoneE164: string,
     userId: number,
+    state: ConversationStateRecord,
     text: string
   ): Promise<void> {
+    if (!state.selectedObraId || !state.selectedObraNome) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
     const empresas = await this.deps.store.findEmpresasByUser(userId);
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
       return;
     }
 
+    await this.startTrainingForEmpresa(chatId, phoneE164, empresa.id, state.selectedObraId, state.selectedObraNome);
+  }
+
+  private async startTrainingForEmpresa(
+    chatId: string,
+    phoneE164: string,
+    empresaId: bigint,
+    obraId: number,
+    obraNome: string
+  ): Promise<void> {
     await this.saveState({
       chatId,
       phoneE164,
       step: "AWAITING_TRAINING_TEMA",
       selectedTipo: "Treinamento",
-      selectedEmpresaId: empresa.id,
+      selectedEmpresaId: empresaId,
+      selectedObraId: obraId,
+      selectedObraNome: obraNome,
       selectedTipoServico: null,
       selectedNumeroProcedimento: null,
       selectedTreinamentoTema: null,
@@ -397,7 +537,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedTrainingPhotoCount: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+    await this.sendWithHeader(chatId, obraNome, trainingTemaPromptText());
   }
 
   private async handleTrainingTema(
@@ -406,14 +546,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord,
     text: string
   ): Promise<void> {
-    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId) {
+    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const tema = text.trim();
     if (!tema) {
-      await this.deps.messaging.sendText(chatId, trainingTemaPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, trainingTemaPromptText());
       return;
     }
 
@@ -424,7 +564,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       step: "AWAITING_TRAINING_PARTICIPANTS",
       selectedTreinamentoTema: tema
     });
-    await this.deps.messaging.sendText(chatId, trainingParticipantsPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, trainingParticipantsPromptText());
   }
 
   private async handleTrainingParticipants(
@@ -433,14 +573,19 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord,
     text: string
   ): Promise<void> {
-    if (state.selectedTipo !== "Treinamento" || !state.selectedEmpresaId || !state.selectedTreinamentoTema) {
+    if (
+      state.selectedTipo !== "Treinamento" ||
+      !state.selectedEmpresaId ||
+      !state.selectedTreinamentoTema ||
+      !state.selectedObraNome
+    ) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const participantes = text.trim();
     if (!participantes) {
-      await this.deps.messaging.sendText(chatId, trainingParticipantsPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, trainingParticipantsPromptText());
       return;
     }
 
@@ -451,7 +596,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       step: "AWAITING_TRAINING_DATES",
       selectedTreinamentoParticipantes: participantes
     });
-    await this.deps.messaging.sendText(chatId, trainingDatesPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, trainingDatesPromptText());
   }
 
   private async handleTrainingDates(
@@ -465,7 +610,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       state.selectedTipo !== "Treinamento" ||
       !state.selectedEmpresaId ||
       !state.selectedTreinamentoTema ||
-      !state.selectedTreinamentoParticipantes
+      !state.selectedTreinamentoParticipantes ||
+      !state.selectedObraNome
     ) {
       await this.resetToMenu(chatId, phoneE164);
       return;
@@ -473,13 +619,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const dateRange = parseTrainingDateRange(text);
     if (!dateRange) {
-      await this.deps.messaging.sendText(chatId, `Data/hora invalida.\n\n${trainingDatesPromptText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Data/hora invalida.\n\n${trainingDatesPromptText()}`);
       return;
     }
 
     const treinamento = await this.deps.store.createTreinamento({
       userId,
       empresaId: state.selectedEmpresaId,
+      obraId: state.selectedObraId ?? null,
       tema: state.selectedTreinamentoTema,
       participantes: state.selectedTreinamentoParticipantes,
       inicio: dateRange.inicio,
@@ -496,7 +643,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedTrainingPhotoCount: 0,
       pendingEntradaId: treinamento.entradaId
     });
-    await this.deps.messaging.sendText(chatId, trainingPhotoPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, trainingPhotoPromptText());
   }
 
   private async handleTrainingPhoto(
@@ -506,7 +653,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord,
     payload: WahaMessagePayload
   ): Promise<void> {
-    if (!state.selectedEmpresaId || !state.pendingEntradaId) {
+    if (!state.selectedEmpresaId || !state.pendingEntradaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -515,7 +662,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const photoCount = state.selectedTrainingPhotoCount ?? 0;
     if (TRAINING_PHOTO_DONE_COMMANDS.has(text)) {
       if (photoCount === 0) {
-        await this.deps.messaging.sendText(chatId, "Envie pelo menos uma foto do treinamento para continuar.");
+        await this.sendWithHeader(chatId, state.selectedObraNome, "Envie pelo menos uma foto do treinamento para continuar.");
         return;
       }
 
@@ -525,7 +672,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         phoneE164,
         step: "AWAITING_TRAINING_FILE"
       });
-      await this.deps.messaging.sendText(chatId, trainingFilePromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, trainingFilePromptText());
       return;
     }
 
@@ -549,7 +696,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       phoneE164,
       selectedTrainingPhotoCount: photoCount + 1
     });
-    await this.deps.messaging.sendText(chatId, "Foto recebida. Envie outra foto ou digite OK para continuar.");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "Foto recebida. Envie outra foto ou digite OK para continuar.");
   }
 
   private async handleTrainingFile(
@@ -646,29 +793,28 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     text: string
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo || !state.selectedEmpresaId) {
+    if (!tipo || !state.selectedEmpresaId || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const tipoServico = TIPO_SERVICO_OPTIONS[text];
     if (!tipoServico) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${tipoServicoMenuText(tipo)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${tipoServicoMenuText(tipo)}`);
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "AWAITING_PROCEDURE_NUMBER",
-      selectedTipo: tipo,
-      selectedEmpresaId: state.selectedEmpresaId,
       selectedTipoServico: tipoServico,
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
 
-    await this.deps.messaging.sendText(chatId, numeroProcedimentoPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoPromptText());
   }
 
   private async handleProcedureNumber(
@@ -680,31 +826,30 @@ export class DiarioDasObrasFlow implements FlowDefinition {
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
     const tipoServico = this.requireSelectedTipoServico(state);
-    if (!tipo || !state.selectedEmpresaId || !tipoServico) {
+    if (!tipo || !state.selectedEmpresaId || !tipoServico || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const numeroProcedimento = text.trim();
     if (!numeroProcedimento) {
-      await this.deps.messaging.sendText(chatId, numeroProcedimentoPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoPromptText());
       return;
     }
 
     const empresa = await this.findSelectedEmpresaForUser(userId, state.selectedEmpresaId);
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "AWAITING_PHOTO",
-      selectedTipo: tipo,
-      selectedEmpresaId: state.selectedEmpresaId,
-      selectedTipoServico: tipoServico,
       selectedNumeroProcedimento: numeroProcedimento,
       pendingEntradaId: null
     });
 
-    await this.deps.messaging.sendText(
+    await this.sendWithHeader(
       chatId,
+      state.selectedObraNome,
       photoPromptText(tipo, empresa, tipoServico, numeroProcedimento)
     );
   }
@@ -719,20 +864,27 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const tipo = this.requireSelectedTipo(state);
     const tipoServico = this.requireSelectedTipoServico(state);
     const numeroProcedimento = state.selectedNumeroProcedimento?.trim();
-    if (!tipo || !state.selectedEmpresaId || !tipoServico || !numeroProcedimento) {
+    if (
+      !tipo ||
+      !state.selectedEmpresaId ||
+      !tipoServico ||
+      !numeroProcedimento ||
+      !state.selectedObraId ||
+      !state.selectedObraNome
+    ) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const media = payload.media;
     if (!payload.hasMedia || !media?.url) {
-      await this.deps.messaging.sendText(chatId, "Envie uma foto para continuar.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "Envie uma foto para continuar.");
       return;
     }
 
     const contentType = media.mimetype ?? "application/octet-stream";
     if (!contentType.startsWith("image/")) {
-      await this.deps.messaging.sendText(chatId, "O arquivo precisa ser uma imagem. Envie uma foto para continuar.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "O arquivo precisa ser uma imagem. Envie uma foto para continuar.");
       return;
     }
 
@@ -755,6 +907,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const entrada = await this.deps.store.createEntrada({
         userId,
         empresaId: state.selectedEmpresaId,
+        obraId: state.selectedObraId,
         tipo,
         tipoServico,
         numeroProcedimento,
@@ -767,21 +920,19 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       });
 
       await this.saveState({
+        ...state,
         chatId,
         phoneE164,
         step: "AWAITING_DESCRIPTION",
-        selectedTipo: tipo,
-        selectedEmpresaId: state.selectedEmpresaId,
-        selectedTipoServico: tipoServico,
-        selectedNumeroProcedimento: numeroProcedimento,
         pendingEntradaId: entrada.id
       });
 
-      await this.deps.messaging.sendText(chatId, "Foto recebida. Agora envie a descricao.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "Foto recebida. Agora envie a descricao.");
     } catch (error) {
       console.error("Failed to process WhatsApp photo", error);
-      await this.deps.messaging.sendText(
+      await this.sendWithHeader(
         chatId,
+        state.selectedObraNome,
         "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
       );
     }
@@ -795,7 +946,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     if (!text) {
-      await this.deps.messaging.sendText(chatId, "Envie uma descricao em texto para concluir.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "Envie uma descricao em texto para concluir.");
       return;
     }
 
@@ -810,30 +961,28 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord,
     text: string
   ): Promise<void> {
-    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId) {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const numeroOs = text.trim();
     if (!numeroOs) {
-      await this.deps.messaging.sendText(chatId, materialOsPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, materialOsPromptText());
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "AWAITING_PHOTO",
       stepKey: MATERIAL_FLOW_STEPS.awaitingNotaPhoto,
-      selectedTipo: MATERIAL_TIPO,
-      selectedEmpresaId: state.selectedEmpresaId,
-      selectedTipoServico: null,
       selectedNumeroProcedimento: numeroOs,
       pendingEntradaId: null,
       flowData: {}
     });
-    await this.deps.messaging.sendText(chatId, materialNotaPhotoPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, materialNotaPhotoPromptText());
   }
 
   private async handleMaterialNotaPhoto(
@@ -844,7 +993,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     payload: WahaMessagePayload
   ): Promise<void> {
     const numeroOs = state.selectedNumeroProcedimento?.trim();
-    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !numeroOs) {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !numeroOs || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -865,6 +1014,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const entrada = await this.deps.store.createEntrada({
         userId,
         empresaId: state.selectedEmpresaId,
+        obraId: state.selectedObraId ?? null,
         tipo: MATERIAL_TIPO,
         tipoServico: null,
         numeroProcedimento: numeroOs,
@@ -878,22 +1028,20 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       });
 
       await this.saveState({
+        ...state,
         chatId,
         phoneE164,
         step: "AWAITING_PHOTO",
         stepKey: MATERIAL_FLOW_STEPS.awaitingMaterialPhoto,
-        selectedTipo: MATERIAL_TIPO,
-        selectedEmpresaId: state.selectedEmpresaId,
-        selectedTipoServico: null,
-        selectedNumeroProcedimento: numeroOs,
         pendingEntradaId: entrada.id,
         flowData: {}
       });
-      await this.deps.messaging.sendText(chatId, materialPhotoPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, materialPhotoPromptText());
     } catch (error) {
       console.error("Failed to save material receipt note photo", error);
-      await this.deps.messaging.sendText(
+      await this.sendWithHeader(
         chatId,
+        state.selectedObraNome,
         "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
       );
     }
@@ -907,7 +1055,13 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     payload: WahaMessagePayload
   ): Promise<void> {
     const numeroOs = state.selectedNumeroProcedimento?.trim();
-    if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !state.pendingEntradaId || !numeroOs) {
+    if (
+      state.selectedTipo !== MATERIAL_TIPO ||
+      !state.selectedEmpresaId ||
+      !state.pendingEntradaId ||
+      !numeroOs ||
+      !state.selectedObraNome
+    ) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -932,22 +1086,19 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       });
 
       await this.saveState({
+        ...state,
         chatId,
         phoneE164,
         step: "AWAITING_DESCRIPTION",
         stepKey: MATERIAL_FLOW_STEPS.awaitingQuantity,
-        selectedTipo: MATERIAL_TIPO,
-        selectedEmpresaId: state.selectedEmpresaId,
-        selectedTipoServico: null,
-        selectedNumeroProcedimento: numeroOs,
-        pendingEntradaId: state.pendingEntradaId,
         flowData: {}
       });
-      await this.deps.messaging.sendText(chatId, materialQuantityPromptText());
+      await this.sendWithHeader(chatId, state.selectedObraNome, materialQuantityPromptText());
     } catch (error) {
       console.error("Failed to save material receipt material photo", error);
-      await this.deps.messaging.sendText(
+      await this.sendWithHeader(
         chatId,
+        state.selectedObraNome,
         "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
       );
     }
@@ -959,14 +1110,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord,
     text: string
   ): Promise<void> {
-    if (state.selectedTipo !== MATERIAL_TIPO || !state.pendingEntradaId) {
+    if (state.selectedTipo !== MATERIAL_TIPO || !state.pendingEntradaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const answer = parseMaterialAnswer(text);
     if (!answer) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${materialQuantityPromptText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${materialQuantityPromptText()}`);
       return;
     }
 
@@ -981,7 +1132,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         [MATERIAL_FLOW_DATA_KEYS.quantidadeCorreta]: answer
       }
     });
-    await this.deps.messaging.sendText(chatId, materialQualityPromptText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, materialQualityPromptText());
   }
 
   private async handleMaterialQuality(
@@ -1006,7 +1157,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const qualidadeCorreta = parseMaterialAnswer(text);
     if (!qualidadeCorreta) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${materialQualityPromptText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${materialQualityPromptText()}`);
       return;
     }
 
@@ -1077,27 +1228,33 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.handleConsultaForTipo(chatId, phoneE164, userId, tipo);
+    await this.handleConsultaForTipo(chatId, phoneE164, userId, state, tipo);
   }
 
   private async handleConsultaForTipo(
     chatId: string,
     phoneE164: string,
     userId: number,
+    state: ConversationStateRecord,
     tipo: EntryTipo
   ): Promise<void> {
+    const obraId = state.selectedObraId;
+    const obraNome = state.selectedObraNome;
+    if (!obraId || !obraNome) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
     const empresas = await this.deps.store.findEmpresasByUser(userId);
     if (empresas.length === 0) {
       await this.deps.store.clearState(chatId);
-      await this.deps.messaging.sendText(
-        chatId,
-        "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador."
-      );
+      await this.deps.messaging.sendText(chatId, NENHUMA_EMPRESA_TEXT);
       return;
     }
 
     if (empresas.length === 1) {
       await this.saveState({
+        ...state,
         chatId,
         phoneE164,
         step: "AWAITING_REPORT_DATE",
@@ -1105,11 +1262,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         selectedEmpresaId: empresas[0].id,
         pendingEntradaId: null
       });
-      await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+      await this.sendWithHeader(chatId, obraNome, "Informe a data do relatorio no formato DD/MM/AAAA.");
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "SELECT_EMPRESA_FOR_REPORT",
@@ -1117,7 +1275,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedEmpresaId: null,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, this.empresaMenuText(empresas));
+    await this.sendWithHeader(chatId, obraNome, this.empresaMenuText(empresas));
   }
 
   private async handleEmpresaSelectionForReport(
@@ -1128,7 +1286,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     text: string
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo) {
+    if (!tipo || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -1137,19 +1295,19 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
       return;
     }
 
     await this.saveState({
+      ...state,
       chatId,
       phoneE164,
       step: "AWAITING_REPORT_DATE",
-      selectedTipo: tipo,
       selectedEmpresaId: empresa.id,
       pendingEntradaId: null
     });
-    await this.deps.messaging.sendText(chatId, "Informe a data do relatorio no formato DD/MM/AAAA.");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "Informe a data do relatorio no formato DD/MM/AAAA.");
   }
 
   private async handleReportDate(
@@ -1159,21 +1317,22 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     text: string
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    if (!tipo || !state.selectedEmpresaId) {
+    if (!tipo || !state.selectedEmpresaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
     const dateRange = parseReportDate(text);
     if (!dateRange) {
-      await this.deps.messaging.sendText(chatId, "Data invalida. Informe a data no formato DD/MM/AAAA.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "Data invalida. Informe a data no formato DD/MM/AAAA.");
       return;
     }
 
-    await this.deps.messaging.sendText(chatId, "Gerando relatorio, aguarde...");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "Gerando relatorio, aguarde...");
 
     const entradas = await this.deps.store.findEntradasForReport({
       empresaId: state.selectedEmpresaId,
+      obraId: state.selectedObraId ?? null,
       tipo,
       dateStart: dateRange.start,
       dateEnd: dateRange.end
@@ -1181,10 +1340,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     if (entradas.length === 0) {
       await this.deps.store.clearState(chatId);
-      await this.deps.messaging.sendText(
-        chatId,
-        `Nenhum registro encontrado para ${text}.\n\n${mainMenuText()}`
-      );
+      await this.sendWithHeader(chatId, state.selectedObraNome, `Nenhum registro encontrado para ${text}.\n\n${mainMenuText()}`);
       return;
     }
 
@@ -1192,6 +1348,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const pdfBuffer = await this.deps.pdfGenerator.generateReport({
       categoria: tipo,
       empresaNome,
+      obraNome: state.selectedObraNome,
       reportDate: text,
       generatedAt: new Date(),
       entradas
@@ -1205,11 +1362,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     });
 
     await this.deps.store.clearState(chatId);
-    await this.deps.messaging.sendText(chatId, mainMenuText());
+    await this.sendWithHeader(chatId, state.selectedObraNome, mainMenuText());
   }
 
   private async saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord> {
-    const stepKey = isMaterialFlowStepKey(input.stepKey) ? input.stepKey : input.step;
+    const stepKey =
+      isMaterialFlowStepKey(input.stepKey) || isObraFlowStepKey(input.stepKey) ? input.stepKey : input.step;
 
     return this.deps.store.saveState({
       ...input,
@@ -1217,6 +1375,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       stepKey,
       flowData: buildDiarioFlowData(input)
     });
+  }
+
+  private async sendWithHeader(chatId: string, obraNome: string | null | undefined, message: string): Promise<void> {
+    await this.deps.messaging.sendText(chatId, obraNome ? withObraHeader(obraNome, message) : message);
   }
 
   private async findSelectedEmpresaForUser(userId: number, empresaId: bigint): Promise<EmpresaRecord> {
@@ -1256,6 +1418,8 @@ function buildDiarioFlowData(input: SaveConversationStateInput): FlowData {
     ...data,
     selectedTipo: input.selectedTipo ?? null,
     selectedEmpresaId: input.selectedEmpresaId?.toString() ?? null,
+    selectedObraId: input.selectedObraId ?? null,
+    selectedObraNome: input.selectedObraNome ?? null,
     selectedTipoServico: input.selectedTipoServico ?? null,
     selectedNumeroProcedimento: input.selectedNumeroProcedimento ?? null,
     selectedTreinamentoTema: input.selectedTreinamentoTema ?? null,
@@ -1274,6 +1438,8 @@ function hydrateDiarioState(state: ConversationStateRecord): ConversationStateRe
     ...state,
     selectedTipo: state.selectedTipo ?? stringFromData(data.selectedTipo),
     selectedEmpresaId: state.selectedEmpresaId ?? bigintFromData(data.selectedEmpresaId),
+    selectedObraId: state.selectedObraId ?? numberFromData(data.selectedObraId),
+    selectedObraNome: state.selectedObraNome ?? stringFromData(data.selectedObraNome),
     selectedTipoServico: state.selectedTipoServico ?? stringFromData(data.selectedTipoServico),
     selectedNumeroProcedimento:
       state.selectedNumeroProcedimento ?? stringFromData(data.selectedNumeroProcedimento),

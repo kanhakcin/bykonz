@@ -1,7 +1,16 @@
 import cors from "cors";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { createPanelAuth, safeEquals } from "./panelAuth";
-import { InvalidDateError, type PanelService } from "../services/panelService";
+import {
+  DuplicateProjectCodeError,
+  DuplicateStandardCodeError,
+  InvalidDateError,
+  ProjectInUseError,
+  StandardInUseError,
+  type PanelService,
+  type ProjectInput,
+  type StandardInput
+} from "../services/panelService";
 
 export interface PanelRouterOptions {
   token: string;
@@ -19,7 +28,7 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
   router.use(
     cors({
       origin: options.corsOrigins ?? ["http://localhost:5173"],
-      methods: ["GET", "POST", "OPTIONS"],
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Authorization", "Content-Type"]
     })
   );
@@ -126,7 +135,318 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     });
   }
 
+  // ---- Standards registry (CRUD) -------------------------------------------
+
+  router.get("/standards", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listStandards({ search, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/standards/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const standard = await service.getStandard(id);
+      if (!standard) {
+        res.status(404).json({ error: "standard_not_found" });
+        return;
+      }
+
+      res.json(standard);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/standards", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parseStandardInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createStandard(input));
+    } catch (error) {
+      handleStandardError(error, res, next);
+    }
+  });
+
+  router.put("/standards/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parseStandardInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const standard = await service.updateStandard(id, input);
+      if (!standard) {
+        res.status(404).json({ error: "standard_not_found" });
+        return;
+      }
+
+      res.json(standard);
+    } catch (error) {
+      handleStandardError(error, res, next);
+    }
+  });
+
+  router.delete("/standards/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deleteStandard(id);
+      if (!found) {
+        res.status(404).json({ error: "standard_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handleStandardError(error, res, next);
+    }
+  });
+
+  // ---- Projects/obras registry (CRUD) ---------------------------------------
+
+  router.get("/projects", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+      const activeOnly = req.query.active === "true";
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listProjects({ search, page, size, activeOnly }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/projects/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const project = await service.getProjectItem(id);
+      if (!project) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+
+      res.json(project);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/projects", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parseProjectInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createProject(input));
+    } catch (error) {
+      handleProjectError(error, res, next);
+    }
+  });
+
+  router.put("/projects/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parseProjectInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const project = await service.updateProject(id, input);
+      if (!project) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+
+      res.json(project);
+    } catch (error) {
+      handleProjectError(error, res, next);
+    }
+  });
+
+  router.delete("/projects/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deleteProject(id);
+      if (!found) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handleProjectError(error, res, next);
+    }
+  });
+
   return router;
+}
+
+/** O campo `code` nas respostas de erro é a chave i18n exibida pelo frontend. */
+function handleStandardError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicateStandardCodeError) {
+    res.status(409).json({ error: "duplicate_code", code: "standard.duplicated" });
+    return;
+  }
+  if (error instanceof StandardInUseError) {
+    res.status(409).json({ error: "standard_in_use", code: "standard.inUse" });
+    return;
+  }
+  next(error);
+}
+
+function handleProjectError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicateProjectCodeError) {
+    res.status(409).json({ error: "duplicate_code", code: "project.duplicated" });
+    return;
+  }
+  if (error instanceof ProjectInUseError) {
+    res.status(409).json({ error: "project_in_use", code: "project.inUse" });
+    return;
+  }
+  next(error);
+}
+
+function parseProjectInput(body: unknown): ProjectInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { code, name, context, active } = body as Record<string, unknown>;
+  if (typeof code !== "string" || code.trim() === "" || code.length > 30) {
+    return null;
+  }
+  if (typeof name !== "string" || name.trim() === "" || name.length > 200) {
+    return null;
+  }
+  if (!isOptionalString(context, 200)) {
+    return null;
+  }
+  if (active !== undefined && typeof active !== "boolean") {
+    return null;
+  }
+
+  return {
+    code: code.trim(),
+    name: name.trim(),
+    context: normalizeOptional(context),
+    active: active ?? true
+  };
+}
+
+function parseId(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) {
+    return null;
+  }
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function parsePositiveInt(raw: unknown, fallback: number): number | null {
+  if (raw === undefined) {
+    return fallback;
+  }
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function parseStandardInput(body: unknown): StandardInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { code, title, description, version, active } = body as Record<string, unknown>;
+  if (typeof code !== "string" || code.trim() === "" || code.length > 60) {
+    return null;
+  }
+  if (typeof title !== "string" || title.trim() === "" || title.length > 200) {
+    return null;
+  }
+  if (!isOptionalString(description, 2000) || !isOptionalString(version, 40)) {
+    return null;
+  }
+  if (active !== undefined && typeof active !== "boolean") {
+    return null;
+  }
+
+  return {
+    code: code.trim(),
+    title: title.trim(),
+    description: normalizeOptional(description),
+    version: normalizeOptional(version),
+    active: active ?? true
+  };
+}
+
+function isOptionalString(value: unknown, maxLength: number): value is string | null | undefined {
+  return value === undefined || value === null || (typeof value === "string" && value.length <= maxLength);
+}
+
+function normalizeOptional(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 function initialsOf(name: string): string {

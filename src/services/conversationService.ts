@@ -22,6 +22,7 @@ export type {
   MediaDownloader,
   MessagingClient,
   ObjectStorage,
+  ObraRecord,
   PdfGenerator,
   ReportInput,
   SaveConversationStateInput,

@@ -1,5 +1,5 @@
-import { Ban, CheckCircle2, Cog, Image as ImageIcon, TriangleAlert, User } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { Ban, CheckCircle2, Cog, Image as ImageIcon, TriangleAlert, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';

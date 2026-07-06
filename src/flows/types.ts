@@ -31,6 +31,13 @@ export interface EmpresaRecord {
   nome?: string | null;
 }
 
+/** Obra (projects) disponível para vincular registros. */
+export interface ObraRecord {
+  id: number;
+  nome: string;
+  codigo: string;
+}
+
 export interface ConversationStateRecord {
   chatId: string;
   phoneE164: string;
@@ -40,6 +47,8 @@ export interface ConversationStateRecord {
   flowData?: FlowData | null;
   selectedTipo?: string | null;
   selectedEmpresaId?: bigint | null;
+  selectedObraId?: number | null;
+  selectedObraNome?: string | null;
   selectedTipoServico?: string | null;
   selectedNumeroProcedimento?: string | null;
   selectedTreinamentoTema?: string | null;
@@ -55,6 +64,7 @@ export interface SaveConversationStateInput extends ConversationStateRecord {}
 export interface CreateEntradaInput {
   userId: number;
   empresaId: bigint;
+  obraId?: number | null;
   tipo: string;
   tipoServico?: string | null;
   numeroProcedimento?: string | null;
@@ -64,6 +74,7 @@ export interface CreateEntradaInput {
 export interface CreateTreinamentoInput {
   userId: number;
   empresaId: bigint;
+  obraId?: number | null;
   tema: string;
   participantes: string;
   inicio: Date;
@@ -89,6 +100,7 @@ export interface EntradaForReport {
 export interface ReportInput {
   categoria: string;
   empresaNome: string;
+  obraNome?: string | null;
   reportDate: string;
   generatedAt: Date;
   entradas: EntradaForReport[];
@@ -97,6 +109,7 @@ export interface ReportInput {
 export interface ConversationStore {
   findUserByPhone(phoneDigits: string): Promise<UserRecord | null>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
+  findObrasAtivas(): Promise<ObraRecord[]>;
   getState(chatId: string): Promise<ConversationStateRecord | null>;
   saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord>;
   clearState(chatId: string): Promise<void>;
@@ -106,6 +119,7 @@ export interface ConversationStore {
   updateEntradaDescription(entradaId: bigint, description: string): Promise<void>;
   findEntradasForReport(input: {
     empresaId: bigint;
+    obraId?: number | null;
     tipo: string;
     dateStart: Date;
     dateEnd: Date;

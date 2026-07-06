@@ -9,6 +9,7 @@ import {
   type EntradaForReport,
   type MessagingClient,
   type ObjectStorage,
+  type ObraRecord,
   type PdfGenerator,
   type ReportInput,
   type UserRecord
@@ -30,6 +31,7 @@ const CONSULTA_ACTION_MENU_CATEGORY_OPTIONS = [
 class FakeStore implements ConversationStore {
   users = new Map<string, UserRecord>();
   empresasByUser = new Map<number, EmpresaRecord[]>();
+  obras: ObraRecord[] = [{ id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" }];
   states = new Map<string, ConversationStateRecord>();
   entradas: Array<CreateEntradaInput & { id: bigint }> = [];
   treinamentos: Array<CreateTreinamentoInput & { id: number; entradaId: bigint }> = [];
@@ -42,6 +44,10 @@ class FakeStore implements ConversationStore {
 
   async findEmpresasByUser(userId: number): Promise<EmpresaRecord[]> {
     return this.empresasByUser.get(userId) ?? [];
+  }
+
+  async findObrasAtivas(): Promise<ObraRecord[]> {
+    return this.obras;
   }
 
   async getState(chatId: string): Promise<ConversationStateRecord | null> {
@@ -97,6 +103,7 @@ class FakeStore implements ConversationStore {
 
   async findEntradasForReport(_input: {
     empresaId: bigint;
+    obraId?: number | null;
     tipo: string;
     dateStart: Date;
     dateEnd: Date;
@@ -451,10 +458,27 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).not.toContain("2) Incluir");
   });
 
-  it("routes a first message main-menu selection instead of re-sending the main menu", async () => {
+  it("goes straight to the main menu on the first message when there is only one obra", async () => {
+    const { service, store, messaging } = createHarness();
+
+    await service.handleWebhook(textWebhook("oi"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      flowKey: "diario-das-obras",
+      stepKey: "MAIN_MENU",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora"
+    });
+    expect(messaging.messages).toHaveLength(1);
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+  });
+
+  it("routes a main-menu selection right after the obra is auto-selected", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
+    await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("6"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -468,15 +492,14 @@ describe("ConversationService", () => {
         selectedEmpresaId: "10"
       })
     });
-    expect(messaging.messages).toHaveLength(1);
     expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
-    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
   });
 
-  it("routes first-message Gerar diario de obra selection into the report flow", async () => {
+  it("routes the Gerar diario de obra selection into the report flow", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
+    await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("7"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -490,9 +513,7 @@ describe("ConversationService", () => {
         selectedEmpresaId: "10"
       })
     });
-    expect(messaging.messages).toHaveLength(1);
     expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
-    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
   });
 
   it("resumes DiarioDasObras using generic flowKey, stepKey, and flowData", async () => {
@@ -505,7 +526,9 @@ describe("ConversationService", () => {
       stepKey: "AWAITING_TRAINING_TEMA",
       flowData: {
         selectedTipo: "Treinamento",
-        selectedEmpresaId: "10"
+        selectedEmpresaId: "10",
+        selectedObraId: 1,
+        selectedObraNome: "Obra Residencial Aurora"
       },
       selectedTipo: null,
       selectedEmpresaId: null,
@@ -711,7 +734,8 @@ describe("ConversationService", () => {
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_SERVICE_TYPE",
       selectedTipo: "Inspecao de servico",
-      selectedEmpresaId: 10n
+      selectedEmpresaId: 10n,
+      selectedObraId: 1
     });
     expect(messaging.messages.at(-1)?.text).toContain("Escolha o tipo de serviço");
 
@@ -727,6 +751,7 @@ describe("ConversationService", () => {
       step: "AWAITING_PHOTO",
       selectedNumeroProcedimento: "PROC-45/2026"
     });
+    expect(messaging.messages.at(-1)?.text).toContain("Obra: Obra Residencial Aurora");
     expect(messaging.messages.at(-1)?.text).toContain("Hidráulica");
     expect(messaging.messages.at(-1)?.text).toContain("PROC-45/2026");
 
@@ -739,6 +764,7 @@ describe("ConversationService", () => {
       {
         userId: 7,
         empresaId: 10n,
+        obraId: 1,
         tipo: "Inspecao de servico",
         tipoServico: "Hidráulica",
         numeroProcedimento: "PROC-45/2026",
@@ -748,6 +774,148 @@ describe("ConversationService", () => {
     expect(store.media[0].mediaUrl).toBe(storage.uploads[0].path);
     expect(store.states.has(CHAT_ID)).toBe(false);
     expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+  });
+
+  it("asks which obra to work on before showing the main menu when there are multiple", async () => {
+    const { service, store, messaging } = createHarness();
+    store.obras = [
+      { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
+      { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
+    ];
+
+    await service.handleWebhook(textWebhook("oi"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "SELECT_EMPRESA",
+      stepKey: "SELECT_OBRA",
+      flowData: expect.objectContaining({ selectedObraId: null })
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
+    expect(messaging.messages.at(-1)?.text).toContain("1) Obra Residencial Aurora");
+    expect(messaging.messages.at(-1)?.text).toContain("2) Obra Boulevard");
+    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
+
+    await service.handleWebhook(textWebhook("2"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      selectedObraId: 4,
+      selectedObraNome: "Obra Boulevard",
+      flowData: expect.objectContaining({ selectedObraId: 4, selectedObraNome: "Obra Boulevard" })
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Boulevard");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+  });
+
+  it("auto-selects the only active obra without asking", async () => {
+    const { service, store, messaging } = createHarness();
+
+    await service.handleWebhook(textWebhook("oi"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Residencial Aurora");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+  });
+
+  it("re-prompts the obra menu after an invalid obra selection", async () => {
+    const { service, store, messaging } = createHarness();
+    store.obras = [
+      { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
+      { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
+    ];
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("9"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "SELECT_EMPRESA",
+      stepKey: "SELECT_OBRA"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
+    expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
+  });
+
+  it("blocks the entire flow when there are no active obras", async () => {
+    const { service, store, messaging } = createHarness();
+    store.obras = [];
+
+    await service.handleWebhook(textWebhook("oi"));
+
+    expect(store.states.has(CHAT_ID)).toBe(false);
+    expect(messaging.messages.at(-1)?.text).toContain("Nenhuma obra ativa cadastrada");
+  });
+
+  it("links the entry to the selected obra across the full inspection flow", async () => {
+    const { service, store } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    store.obras = [
+      { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
+      { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
+    ];
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("6"));
+    await service.handleWebhook(textWebhook("PROC-01/2026"));
+    await service.handleWebhook(photoWebhook());
+    await service.handleWebhook(textWebhook("Concretagem da laje 14"));
+
+    expect(store.entradas).toMatchObject([
+      {
+        userId: 7,
+        empresaId: 10n,
+        obraId: 4,
+        tipo: "Inspecao de servico",
+        tipoServico: "Concretagem",
+        numeroProcedimento: "PROC-01/2026",
+        description: "Concretagem da laje 14"
+      }
+    ]);
+    expect(store.states.has(CHAT_ID)).toBe(false);
+  });
+
+  it("lets the user switch obra mid-conversation with the 'trocar obra' command", async () => {
+    const { service, store, messaging } = createHarness();
+    store.obras = [
+      { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
+      { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
+    ];
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("2"));
+
+    await service.handleWebhook(textWebhook("trocar obra"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "SELECT_EMPRESA",
+      stepKey: "SELECT_OBRA"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
+
+    await service.handleWebhook(textWebhook("1"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Residencial Aurora");
+  });
+
+  it("prefixes every bot message with the current obra header", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+
+    expect(messaging.messages.at(-1)?.text).toContain("🏗️ Obra: Obra Residencial Aurora");
   });
 
   it("runs the Recebimento de material include flow with OS, note photo, material photo, quantity, and quality", async () => {
@@ -950,14 +1118,19 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Escolha o tipo de serviço");
   });
 
-  it("resets the flow from any step", async () => {
+  it("resets the flow from any step while keeping the active obra", async () => {
     const { service, store, messaging } = createHarness();
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("cancelar"));
 
-    expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora"
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("🏗️ Obra: Obra Residencial Aurora");
     expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 

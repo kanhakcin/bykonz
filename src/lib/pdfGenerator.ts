@@ -24,6 +24,9 @@ export class PdfReportGenerator implements PdfGenerator {
     doc.font("Helvetica").fontSize(10);
     doc.moveDown(0.5);
     doc.text(`Empresa: ${input.empresaNome}`);
+    if (input.obraNome) {
+      doc.text(`Obra: ${input.obraNome}`);
+    }
     doc.text(`Data: ${input.reportDate}`);
     doc.text(`Gerado em: ${formatDateTime(input.generatedAt)}`);
     doc.text(`Total de registros: ${input.entradas.length}`);

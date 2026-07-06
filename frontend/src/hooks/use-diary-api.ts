@@ -4,14 +4,14 @@ import type { DiaryDay } from '@/routes/_private/painel/@interface/diary';
 
 export const diaryKeys = {
   all: ['diary'] as const,
-  day: (dateISO: string) => [...diaryKeys.all, dateISO] as const,
+  day: (dateISO: string, projectId?: number) => [...diaryKeys.all, dateISO, projectId] as const,
 };
 
-export function useDiaryDay(dateISO: string) {
+export function useDiaryDay(dateISO: string, projectId?: number) {
   return useQuery({
-    queryKey: diaryKeys.day(dateISO),
+    queryKey: diaryKeys.day(dateISO, projectId),
     queryFn: async () => {
-      const response = await api.get<DiaryDay>('/diary', { params: { date: dateISO } });
+      const response = await api.get<DiaryDay>('/diary', { params: { date: dateISO, projectId } });
       return response.data;
     },
   });

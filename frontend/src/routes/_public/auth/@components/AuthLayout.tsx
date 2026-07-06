@@ -20,12 +20,7 @@ export function AuthLayout({ children }: { children?: ReactNode }) {
       <footer className="w-full py-4 text-center">
         <p className="text-muted-foreground text-xs">
           Diário de Obras powered by{' '}
-          <a
-            href="https://www.bykonz.com"
-            target="_blank"
-            rel="noreferrer"
-            className="text-foreground hover:underline hover:decoration-dashed hover:underline-offset-4"
-          >
+          <a href="https://www.bykonz.com" target="_blank" rel="noreferrer" className="text-foreground hover:underline hover:decoration-dashed hover:underline-offset-4">
             Bykonz
           </a>{' '}
           © {new Date().getFullYear()}

@@ -3,13 +3,25 @@ import request from "supertest";
 import { createApp, type WebhookHandler } from "../src/app";
 import { createPanelRouter } from "../src/api/panelRouter";
 import {
+  DuplicateProjectCodeError,
+  DuplicateStandardCodeError,
   PanelService,
+  ProjectInUseError,
+  StandardInUseError,
   type AlertRecord,
   type CodeRef,
   type EntryRecord,
   type PanelStore,
   type PersonRef,
-  type ProjectRecord
+  type ProjectInput,
+  type ProjectListInput,
+  type ProjectListItem,
+  type ProjectListResult,
+  type ProjectRecord,
+  type StandardInput,
+  type StandardListInput,
+  type StandardListResult,
+  type StandardRecord
 } from "../src/services/panelService";
 
 const TOKEN = "test-token";
@@ -34,6 +46,12 @@ class FakePanelStore implements PanelStore {
   entries: EntryRecord[] = [];
   alerts: AlertRecord[] = [];
   standards: CodeRef[] = [{ id: 24, code: "PS-024" }];
+  standardRecords: StandardRecord[] = [];
+  standardsInUse = new Set<number>();
+  private nextStandardId = 1;
+  projectItems: ProjectListItem[] = [];
+  projectsInUse = new Set<number>();
+  private nextProjectId = 1;
   people: PersonRef[] = [{ id: 118, name: "José Pereira", registrationCode: "MAT-118" }];
   machines: CodeRef[] = [{ id: 7, code: "MX-007" }];
   assets: CodeRef[] = [];
@@ -43,6 +61,20 @@ class FakePanelStore implements PanelStore {
   }
 
   reset(): void {
+    this.nextProjectId = 1;
+    this.projectsInUse = new Set([1]);
+    this.projectItems = [
+      this.buildProject({ code: "AUR", name: "Obra Residencial Aurora", context: "Apto 1403 · Laje tipo 04", active: true }),
+      this.buildProject({ code: "BSV", name: "Obra Boulevard Sete Vidas", context: null, active: false })
+    ];
+
+    this.nextStandardId = 1;
+    this.standardsInUse = new Set();
+    this.standardRecords = [
+      this.buildStandard({ code: "PS-024", title: "Grauteamento", description: null, version: "3", active: true }),
+      this.buildStandard({ code: "PS-031", title: "Solda estrutural", description: "Procedimento de solda.", version: null, active: false })
+    ];
+
     this.entries = [
       {
         id: 1n,
@@ -207,6 +239,117 @@ class FakePanelStore implements PanelStore {
       }
     }
     return false;
+  }
+
+  async listStandards(input: StandardListInput): Promise<StandardListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.standardRecords
+      .filter((s) => !search || s.code.toLowerCase().includes(search) || s.title.toLowerCase().includes(search))
+      .sort((a, b) => a.code.localeCompare(b.code));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async findStandardById(id: number): Promise<StandardRecord | null> {
+    return this.standardRecords.find((s) => s.id === id) ?? null;
+  }
+
+  async createStandard(input: StandardInput): Promise<StandardRecord> {
+    this.assertUniqueCode(input.code);
+    const standard = this.buildStandard(input);
+    this.standardRecords.push(standard);
+    return standard;
+  }
+
+  async updateStandard(id: number, input: StandardInput): Promise<StandardRecord | null> {
+    const standard = this.standardRecords.find((s) => s.id === id);
+    if (!standard) {
+      return null;
+    }
+    this.assertUniqueCode(input.code, id);
+    Object.assign(standard, input);
+    return standard;
+  }
+
+  async deleteStandard(id: number): Promise<boolean> {
+    if (this.standardsInUse.has(id)) {
+      throw new StandardInUseError(id);
+    }
+    const index = this.standardRecords.findIndex((s) => s.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.standardRecords.splice(index, 1);
+    return true;
+  }
+
+  private buildStandard(input: StandardInput): StandardRecord {
+    return { id: this.nextStandardId++, ...input };
+  }
+
+  private assertUniqueCode(code: string, exceptId?: number): void {
+    if (this.standardRecords.some((s) => s.code === code && s.id !== exceptId)) {
+      throw new DuplicateStandardCodeError(code);
+    }
+  }
+
+  async listProjects(input: ProjectListInput): Promise<ProjectListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.projectItems
+      .filter((p) => !input.activeOnly || p.active)
+      .filter((p) => !search || p.code.toLowerCase().includes(search) || p.name.toLowerCase().includes(search))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async findProjectItemById(id: number): Promise<ProjectListItem | null> {
+    return this.projectItems.find((p) => p.id === id) ?? null;
+  }
+
+  async createProject(input: ProjectInput): Promise<ProjectListItem> {
+    this.assertUniqueProjectCode(input.code);
+    const project = this.buildProject(input);
+    this.projectItems.push(project);
+    return project;
+  }
+
+  async updateProject(id: number, input: ProjectInput): Promise<ProjectListItem | null> {
+    const project = this.projectItems.find((p) => p.id === id);
+    if (!project) {
+      return null;
+    }
+    this.assertUniqueProjectCode(input.code, id);
+    Object.assign(project, input);
+    return project;
+  }
+
+  async deleteProject(id: number): Promise<boolean> {
+    if (this.projectsInUse.has(id)) {
+      throw new ProjectInUseError(id);
+    }
+    const index = this.projectItems.findIndex((p) => p.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.projectItems.splice(index, 1);
+    return true;
+  }
+
+  private buildProject(input: ProjectInput): ProjectListItem {
+    return { id: this.nextProjectId++, ...input };
+  }
+
+  private assertUniqueProjectCode(code: string, exceptId?: number): void {
+    if (this.projectItems.some((p) => p.code === code && p.id !== exceptId)) {
+      throw new DuplicateProjectCodeError(code);
+    }
   }
 }
 
@@ -464,5 +607,259 @@ describe("panel actions", () => {
     const app = buildApp();
     const res = await request(app).post("/api/v1/alerts/abc/resolve").set(auth);
     expect(res.status).toBe(400);
+  });
+});
+
+describe("standards CRUD", () => {
+  it("lists standards ordered by code with the total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/standards").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data.map((s: { code: string }) => s.code)).toEqual(["PS-024", "PS-031"]);
+    expect(res.body.data[0]).toMatchObject({
+      code: "PS-024",
+      title: "Grauteamento",
+      description: null,
+      version: "3",
+      active: true
+    });
+  });
+
+  it("filters by search and paginates", async () => {
+    const app = buildApp();
+
+    const searched = await request(app).get("/api/v1/standards?search=solda").set(auth);
+    expect(searched.body.totalCount).toBe(1);
+    expect(searched.body.data[0].code).toBe("PS-031");
+
+    const paged = await request(app).get("/api/v1/standards?page=1&size=1").set(auth);
+    expect(paged.body.totalCount).toBe(2);
+    expect(paged.body.data.map((s: { code: string }) => s.code)).toEqual(["PS-031"]);
+  });
+
+  it("rejects an invalid page size", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/standards?size=0").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_pagination");
+  });
+
+  it("returns a single standard and 404 for unknown ids", async () => {
+    const app = buildApp();
+
+    const found = await request(app).get("/api/v1/standards/1").set(auth);
+    expect(found.status).toBe(200);
+    expect(found.body.code).toBe("PS-024");
+
+    const missing = await request(app).get("/api/v1/standards/999").set(auth);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe("standard_not_found");
+  });
+
+  it("creates a standard normalizing optional fields", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/standards")
+      .set(auth)
+      .send({ code: " PS-040 ", title: " Içamento de cargas ", description: "", version: "  " });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      code: "PS-040",
+      title: "Içamento de cargas",
+      description: null,
+      version: null,
+      active: true
+    });
+    expect(store.standardRecords).toHaveLength(3);
+  });
+
+  it("rejects an invalid payload", async () => {
+    const app = buildApp();
+    for (const payload of [{}, { code: "PS-041" }, { code: "", title: "x" }, { code: "PS-041", title: "x", active: "yes" }]) {
+      const res = await request(app).post("/api/v1/standards").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 409 with an i18n code for duplicated standard codes", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/standards")
+      .set(auth)
+      .send({ code: "PS-024", title: "Duplicada" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_code", code: "standard.duplicated" });
+  });
+
+  it("updates a standard", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/standards/2")
+      .set(auth)
+      .send({ code: "PS-031", title: "Solda estrutural rev. 2", version: "2", active: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 2, title: "Solda estrutural rev. 2", version: "2", active: true });
+  });
+
+  it("returns 404 when updating an unknown standard", async () => {
+    const app = buildApp();
+    const res = await request(app).put("/api/v1/standards/999").set(auth).send({ code: "X", title: "Y" });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 409 when updating to a code that already exists", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/standards/2")
+      .set(auth)
+      .send({ code: "PS-024", title: "Solda estrutural" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("standard.duplicated");
+  });
+
+  it("deletes a standard", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/standards/1").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(store.standardRecords.map((s) => s.id)).toEqual([2]);
+
+    const again = await request(app).delete("/api/v1/standards/1").set(auth);
+    expect(again.status).toBe(404);
+  });
+
+  it("returns 409 when deleting a standard in use", async () => {
+    const app = buildApp();
+    store.standardsInUse.add(1);
+
+    const res = await request(app).delete("/api/v1/standards/1").set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "standard_in_use", code: "standard.inUse" });
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/standards");
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("projects CRUD", () => {
+  it("lists projects ordered by name with the total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data.map((p: { code: string }) => p.code)).toEqual(["BSV", "AUR"]);
+    expect(res.body.data[1]).toMatchObject({
+      code: "AUR",
+      name: "Obra Residencial Aurora",
+      context: "Apto 1403 · Laje tipo 04",
+      active: true
+    });
+  });
+
+  it("filters only active projects for the panel selector", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects?active=true").set(auth);
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.data[0].code).toBe("AUR");
+  });
+
+  it("filters by search", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects?search=boulevard").set(auth);
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.data[0].code).toBe("BSV");
+  });
+
+  it("returns a single project and 404 for unknown ids", async () => {
+    const app = buildApp();
+
+    const found = await request(app).get("/api/v1/projects/1").set(auth);
+    expect(found.status).toBe(200);
+    expect(found.body.code).toBe("AUR");
+
+    const missing = await request(app).get("/api/v1/projects/999").set(auth);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe("project_not_found");
+  });
+
+  it("creates a project normalizing optional fields", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects")
+      .set(auth)
+      .send({ code: " CDL ", title: undefined, name: " Obra Candelária ", context: "  " });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ code: "CDL", name: "Obra Candelária", context: null, active: true });
+    expect(store.projectItems).toHaveLength(3);
+  });
+
+  it("rejects an invalid payload", async () => {
+    const app = buildApp();
+    for (const payload of [{}, { code: "CDL" }, { code: "", name: "x" }, { code: "CDL", name: "x", active: "yes" }]) {
+      const res = await request(app).post("/api/v1/projects").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 409 with an i18n code for duplicated project codes", async () => {
+    const app = buildApp();
+    const res = await request(app).post("/api/v1/projects").set(auth).send({ code: "AUR", name: "Duplicada" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_code", code: "project.duplicated" });
+  });
+
+  it("updates a project", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/projects/2")
+      .set(auth)
+      .send({ code: "BSV", name: "Obra Boulevard Sete Vidas", context: "Fase 2", active: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 2, context: "Fase 2", active: true });
+  });
+
+  it("returns 404 when updating an unknown project", async () => {
+    const app = buildApp();
+    const res = await request(app).put("/api/v1/projects/999").set(auth).send({ code: "X", name: "Y" });
+    expect(res.status).toBe(404);
+  });
+
+  it("deletes a project without diary entries", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/projects/2").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(store.projectItems.map((p) => p.id)).toEqual([1]);
+  });
+
+  it("returns 409 when deleting a project with diary entries", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/projects/1").set(auth);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "project_in_use", code: "project.inUse" });
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects");
+    expect(res.status).toBe(401);
   });
 });

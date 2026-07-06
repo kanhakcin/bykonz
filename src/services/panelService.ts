@@ -75,6 +75,66 @@ export interface CodeRef {
   code: string;
 }
 
+// ---- Projects (obras) registry ---------------------------------------------
+
+export interface ProjectListItem {
+  id: number;
+  code: string;
+  name: string;
+  context: string | null;
+  active: boolean;
+}
+
+export interface ProjectInput {
+  code: string;
+  name: string;
+  context: string | null;
+  active: boolean;
+}
+
+export interface ProjectListInput {
+  search?: string;
+  page: number;
+  size: number;
+  /** Retorna apenas obras ativas (usado pelo seletor do painel). */
+  activeOnly?: boolean;
+}
+
+export interface ProjectListResult {
+  data: ProjectListItem[];
+  totalCount: number;
+}
+
+// ---- Standards registry ----------------------------------------------------
+
+export interface StandardRecord {
+  id: number;
+  code: string;
+  title: string;
+  description: string | null;
+  version: string | null;
+  active: boolean;
+}
+
+export interface StandardInput {
+  code: string;
+  title: string;
+  description: string | null;
+  version: string | null;
+  active: boolean;
+}
+
+export interface StandardListInput {
+  search?: string;
+  page: number;
+  size: number;
+}
+
+export interface StandardListResult {
+  data: StandardRecord[];
+  totalCount: number;
+}
+
 export interface PanelStore {
   getProject(projectId?: number): Promise<ProjectRecord | null>;
   findEntriesForDay(input: { projectId: number; start: Date; end: Date }): Promise<EntryRecord[]>;
@@ -88,6 +148,16 @@ export interface PanelStore {
   acknowledgeAlert(id: number): Promise<boolean>;
   confirmMention(id: number): Promise<boolean>;
   rejectMention(id: number): Promise<boolean>;
+  listStandards(input: StandardListInput): Promise<StandardListResult>;
+  findStandardById(id: number): Promise<StandardRecord | null>;
+  createStandard(input: StandardInput): Promise<StandardRecord>;
+  updateStandard(id: number, input: StandardInput): Promise<StandardRecord | null>;
+  deleteStandard(id: number): Promise<boolean>;
+  listProjects(input: ProjectListInput): Promise<ProjectListResult>;
+  findProjectItemById(id: number): Promise<ProjectListItem | null>;
+  createProject(input: ProjectInput): Promise<ProjectListItem>;
+  updateProject(id: number, input: ProjectInput): Promise<ProjectListItem | null>;
+  deleteProject(id: number): Promise<boolean>;
 }
 
 // ---- API DTOs ---------------------------------------------------------------
@@ -325,6 +395,46 @@ export class PanelService {
     return this.store.rejectMention(id);
   }
 
+  listStandards(input: StandardListInput): Promise<StandardListResult> {
+    return this.store.listStandards(input);
+  }
+
+  getStandard(id: number): Promise<StandardRecord | null> {
+    return this.store.findStandardById(id);
+  }
+
+  createStandard(input: StandardInput): Promise<StandardRecord> {
+    return this.store.createStandard(input);
+  }
+
+  updateStandard(id: number, input: StandardInput): Promise<StandardRecord | null> {
+    return this.store.updateStandard(id, input);
+  }
+
+  deleteStandard(id: number): Promise<boolean> {
+    return this.store.deleteStandard(id);
+  }
+
+  listProjects(input: ProjectListInput): Promise<ProjectListResult> {
+    return this.store.listProjects(input);
+  }
+
+  getProjectItem(id: number): Promise<ProjectListItem | null> {
+    return this.store.findProjectItemById(id);
+  }
+
+  createProject(input: ProjectInput): Promise<ProjectListItem> {
+    return this.store.createProject(input);
+  }
+
+  updateProject(id: number, input: ProjectInput): Promise<ProjectListItem | null> {
+    return this.store.updateProject(id, input);
+  }
+
+  deleteProject(id: number): Promise<boolean> {
+    return this.store.deleteProject(id);
+  }
+
   async getMedia(id: bigint): Promise<DiaryMedia | null> {
     if (!this.options.mediaStorage) {
       throw new Error("Panel media storage is not configured");
@@ -419,6 +529,38 @@ export class InvalidDateError extends Error {
   constructor(value: string) {
     super(`Invalid date: ${value} (expected YYYY-MM-DD)`);
     this.name = "InvalidDateError";
+  }
+}
+
+/** A standard with the same code already exists in the sector. */
+export class DuplicateStandardCodeError extends Error {
+  constructor(code: string) {
+    super(`Standard code already exists: ${code}`);
+    this.name = "DuplicateStandardCodeError";
+  }
+}
+
+/** The standard is referenced by competencies and cannot be deleted. */
+export class StandardInUseError extends Error {
+  constructor(id: number) {
+    super(`Standard ${id} is referenced and cannot be deleted`);
+    this.name = "StandardInUseError";
+  }
+}
+
+/** A project with the same code already exists for the company. */
+export class DuplicateProjectCodeError extends Error {
+  constructor(code: string) {
+    super(`Project code already exists: ${code}`);
+    this.name = "DuplicateProjectCodeError";
+  }
+}
+
+/** The project has diary entries and cannot be deleted. */
+export class ProjectInUseError extends Error {
+  constructor(id: number) {
+    super(`Project ${id} has diary entries and cannot be deleted`);
+    this.name = "ProjectInUseError";
   }
 }
 

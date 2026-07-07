@@ -113,6 +113,12 @@
   "lost.password": "¿Olvidé la contraseña?",
   "no.connection": "No se pudo conectar. ¡Comprueba tu conexión e inténtalo de nuevo!",
   "project.inUse": "La obra tiene registros en el diario y no se puede eliminar",
+  "project.whatsappGroupId": "Grupo de WhatsApp",
+  "project.whatsappGroupId.help": "ID del grupo de WhatsApp que recibirá el diario de obra (ej: 1203630xxxxx@g.us)",
+  "project.whatsappAutoReportEnabled": "Enviar diario de obra automáticamente vía WhatsApp",
+  "relatorios.dailyPdf.project": "Obra",
+  "relatorios.dailyPdf.date": "Fecha",
+  "relatorios.dailyPdf.download": "Descargar PDF",
   "user.customer": "Usuario cliente",
   "user.disabled": "Usuario discapacitado",
   "access_control": "Control de Acceso",
@@ -244,5 +250,14 @@
   "users.preferences.description": "Notificaciones y configuraciones de acceso específicas por cliente.",
   "permissions.access.description": "Asigne roles y defina restricciones de acceso específicas por cliente.",
   "message.description.placeholder": "Ingrese la descripción",
-  "machine.idEnterprise.placeholder": "Selecciona una empresa"
+  "machine.idEnterprise.placeholder": "Selecciona una empresa",
+  "email.invalid": "Email inválido",
+  "cadastros.tile.panelUsers": "Usuarios del panel",
+  "panelUser.role.ADMIN": "Administrador",
+  "panelUser.role.MANAGER": "Gestor",
+  "panelUser.password": "Contraseña",
+  "panelUser.password.optional": "Nueva contraseña (opcional)",
+  "panelUser.duplicated": "Ya existe un usuario con este email",
+  "panelUser.passwordRequired": "La contraseña es obligatoria",
+  "panelUser.lastActive": "No es posible eliminar o desactivar el último usuario activo"
 }

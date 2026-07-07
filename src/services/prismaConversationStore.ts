@@ -6,6 +6,7 @@ import type {
   CreateTreinamentoInput,
   EmpresaRecord,
   EntradaForReport,
+  ObraForReport,
   ObraRecord,
   SaveConversationStateInput,
   UserRecord
@@ -243,6 +244,70 @@ export class PrismaConversationStore implements ConversationStore {
       empresaNome: e.company?.name ?? null,
       usuarioNome: e.user.name ?? null,
       mediaUrls: e.media.map((m) => m.mediaUrl)
+    }));
+  }
+
+  async findEntradasForObraDay(input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]> {
+    const entries = await this.prisma.entry.findMany({
+      where: {
+        projectId: input.obraId,
+        createdAt: {
+          gte: input.dateStart,
+          lt: input.dateEnd
+        }
+      },
+      include: {
+        company: { select: { name: true } },
+        user: { select: { name: true } },
+        media: { select: { mediaUrl: true } },
+        training: true
+      },
+      orderBy: [{ companyId: "asc" }, { createdAt: "asc" }]
+    });
+
+    return entries.map((e) => ({
+      id: e.id,
+      description: e.description,
+      createdAt: e.createdAt,
+      tipo: e.category,
+      tipoServico: e.serviceType,
+      numeroProcedimento: e.procedureNumber,
+      treinamentoTema: e.training?.topic ?? null,
+      treinamentoParticipantes: e.training?.participants ?? null,
+      treinamentoInicio: e.training?.startsAt ?? null,
+      treinamentoFim: e.training?.endsAt ?? null,
+      empresaNome: e.company?.name ?? null,
+      usuarioNome: e.user.name ?? null,
+      mediaUrls: e.media.map((m) => m.mediaUrl)
+    }));
+  }
+
+  async findObraById(obraId: number): Promise<ObraForReport | null> {
+    const project = await this.prisma.project.findUnique({ where: { id: obraId } });
+    if (!project) {
+      return null;
+    }
+
+    return {
+      id: project.id,
+      nome: project.name,
+      whatsappGroupId: project.whatsappGroupId,
+      whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      status: project.status
+    };
+  }
+
+  async findObrasForAutoReport(): Promise<ObraForReport[]> {
+    const projects = await this.prisma.project.findMany({
+      where: { status: "ACTIVE", whatsappAutoReportEnabled: true }
+    });
+
+    return projects.map((project) => ({
+      id: project.id,
+      nome: project.name,
+      whatsappGroupId: project.whatsappGroupId,
+      whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      status: project.status
     }));
   }
 

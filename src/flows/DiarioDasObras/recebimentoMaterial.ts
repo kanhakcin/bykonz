@@ -29,23 +29,23 @@ export function isMaterialFlowStepKey(value: string | null | undefined): value i
 }
 
 export function materialOsPromptText(): string {
-  return "Informe o número da OS.";
+  return "📦 Passo 1/4 — Qual o número da OS?";
 }
 
 export function materialNotaPhotoPromptText(): string {
-  return "Envie a foto da nota.";
+  return "📦 Passo 2/4 — 📸 Envie a foto da nota fiscal.";
 }
 
 export function materialPhotoPromptText(): string {
-  return "Foto da nota recebida. Agora envie a foto do material.";
+  return "📦 Passo 3/4 — 📸 Nota recebida! Agora envie a foto do material.";
 }
 
 export function materialQuantityPromptText(): string {
-  return "A quantidade está correta?\n1) Sim\n2) Não";
+  return "📦 Passo 4/4 — A quantidade recebida está correta?\n\n1) Sim ✅\n2) Não ❌";
 }
 
 export function materialQualityPromptText(): string {
-  return "A qualidade está correta?\n1) Sim\n2) Não";
+  return "📦 A qualidade do material está boa?\n\n1) Sim ✅\n2) Não ❌";
 }
 
 export function parseMaterialAnswer(text: string): MaterialAnswer | null {

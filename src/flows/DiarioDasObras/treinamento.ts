@@ -8,22 +8,22 @@ export type TrainingMediaType = (typeof TRAINING_MEDIA_TYPES)[keyof typeof TRAIN
 export const TRAINING_PHOTO_DONE_COMMANDS = new Set(["ok", "pronto", "concluir", "fim"]);
 
 export function trainingTemaPromptText(): string {
-  return "Informe o tema do treinamento.";
+  return "🎓 Passo 1/5 — Qual o tema do treinamento?";
 }
 
 export function trainingParticipantsPromptText(): string {
-  return "Informe os nomes e CPFs dos participantes.";
+  return "🎓 Passo 2/5 — Quem participou? Envie os nomes e CPFs.";
 }
 
 export function trainingDatesPromptText(): string {
-  return "Informe data e hora de inicio e fim no formato DD/MM/AAAA HH:mm - DD/MM/AAAA HH:mm.";
+  return "🎓 Passo 3/5 — Qual foi a data e horario?\n\nFormato: DD/MM/AAAA HH:mm - DD/MM/AAAA HH:mm";
 }
 
 export function trainingPhotoPromptText(): string {
-  return "Envie as fotos do treinamento. Quando terminar, digite OK.";
+  return "🎓 Passo 4/5 — 📸 Envie as fotos do treinamento.\n\nQuando terminar, digite OK.";
 }
 
 export function trainingFilePromptText(): string {
-  return "Envie o arquivo do treinamento em PDF ou foto.";
+  return "🎓 Passo 5/5 — 📄 Envie a lista de presença em PDF ou foto.";
 }
 

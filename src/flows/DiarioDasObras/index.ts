@@ -24,6 +24,8 @@ import {
   INCLUDE_ONLY_ACTION_OPTIONS,
   isEntryTipo,
   mainMenuText,
+  postSaveMenuText,
+  POST_SAVE_OPTIONS,
   TIPO_OPTIONS
 } from "./menu";
 import {
@@ -61,7 +63,7 @@ import {
 } from "./treinamento";
 import { DIARIO_DAS_OBRAS_FLOW_KEY, type EntryTipo } from "./types";
 
-const NENHUMA_EMPRESA_TEXT = "Nenhuma empresa vinculada ao seu usuario. Fale com o administrador.";
+const NENHUMA_EMPRESA_TEXT = "⚠️ Voce ainda nao tem empresa vinculada. Fale com o administrador.";
 
 export class DiarioDasObrasFlow implements FlowDefinition {
   readonly key = DIARIO_DAS_OBRAS_FLOW_KEY;
@@ -121,6 +123,9 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         return;
       case "AWAITING_DESCRIPTION":
         await this.handleDescription(input.chatId, state, input.text);
+        return;
+      case "AWAITING_POST_SAVE_CHOICE":
+        await this.handlePostSaveChoice(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case MATERIAL_FLOW_STEPS.awaitingOs:
         await this.handleMaterialOs(input.chatId, input.phoneE164, state, input.text);
@@ -229,7 +234,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const obra = Number.isInteger(selectedIndex) ? obras[selectedIndex] : undefined;
     if (!obra) {
-      await this.deps.messaging.sendText(chatId, `Opcao invalida.\n\n${obraMenuText(obras)}`);
+      await this.deps.messaging.sendText(chatId, "⚠️ Não achei essa obra. Digite o numero da obra na lista acima.");
       return;
     }
 
@@ -289,7 +294,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const tipo = TIPO_OPTIONS[text];
     if (!tipo) {
-      await this.sendWithHeader(chatId, obraNome, `Opcao invalida.\n\n${mainMenuText()}`);
+      await this.sendWithHeader(chatId, obraNome, "⚠️ Não entendi. Digite um numero de 1 a 7.");
       return;
     }
 
@@ -332,7 +337,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         return;
       }
 
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite 1 pra incluir (ou 0 pra voltar).");
       return;
     }
 
@@ -346,7 +351,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${actionMenuText(tipo)}`);
+    await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite 1 ou 2 (ou 0 pra voltar).");
   }
 
   private async resolveEmpresaForAdd(
@@ -402,7 +407,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite o numero da empresa na lista acima.");
       return;
     }
 
@@ -506,7 +511,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite o numero da empresa na lista acima.");
       return;
     }
 
@@ -619,7 +624,11 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const dateRange = parseTrainingDateRange(text);
     if (!dateRange) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Data/hora invalida.\n\n${trainingDatesPromptText()}`);
+      await this.sendWithHeader(
+        chatId,
+        state.selectedObraNome,
+        "⚠️ Não entendi essa data. Use o formato DD/MM/AAAA HH:mm - DD/MM/AAAA HH:mm."
+      );
       return;
     }
 
@@ -662,7 +671,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const photoCount = state.selectedTrainingPhotoCount ?? 0;
     if (TRAINING_PHOTO_DONE_COMMANDS.has(text)) {
       if (photoCount === 0) {
-        await this.sendWithHeader(chatId, state.selectedObraNome, "Envie pelo menos uma foto do treinamento para continuar.");
+        await this.sendWithHeader(chatId, state.selectedObraNome, "📸 Preciso de pelo menos uma foto antes de continuar.");
         return;
       }
 
@@ -683,8 +692,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       payload,
       mediaTipo: TRAINING_MEDIA_TYPES.photo,
       allowedKinds: "image",
-      missingMessage: "Envie uma foto do treinamento para continuar.",
-      invalidMessage: "O arquivo precisa ser uma imagem. Envie uma foto do treinamento."
+      missingMessage: "📸 Preciso de uma foto pra continuar. Manda ela aí.",
+      invalidMessage: "⚠️ Isso nao e uma foto. Envie uma imagem (jpg ou png)."
     });
     if (!uploaded) {
       return;
@@ -696,7 +705,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       phoneE164,
       selectedTrainingPhotoCount: photoCount + 1
     });
-    await this.sendWithHeader(chatId, state.selectedObraNome, "Foto recebida. Envie outra foto ou digite OK para continuar.");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "📸 Foto recebida! Envie outra ou digite OK pra continuar.");
   }
 
   private async handleTrainingFile(
@@ -718,15 +727,15 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       payload,
       mediaTipo: TRAINING_MEDIA_TYPES.file,
       allowedKinds: "image-or-pdf",
-      missingMessage: "Envie o arquivo do treinamento em PDF ou foto.",
-      invalidMessage: "O arquivo precisa ser PDF ou imagem. Envie novamente."
+      missingMessage: "📄 Envie a lista de presença em PDF ou foto.",
+      invalidMessage: "⚠️ Precisa ser um PDF ou uma imagem. Envie novamente."
     });
     if (!uploaded) {
       return;
     }
 
     await this.deps.store.clearState(chatId);
-    await this.deps.messaging.sendText(chatId, "Treinamento salvo com sucesso.");
+    await this.deps.messaging.sendText(chatId, "✅ Treinamento registrado! Bom trabalho.");
   }
 
   private async handleTrainingMediaUpload(input: {
@@ -758,6 +767,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const objectPath = buildStoragePath({
         empresaId: input.state.selectedEmpresaId!,
         userId: input.userId,
+        obraId: input.state.selectedObraId,
         messageId: input.payload.id,
         filename: media.filename,
         contentType
@@ -780,7 +790,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       console.error("Failed to process WhatsApp training media", error);
       await this.deps.messaging.sendText(
         input.chatId,
-        "Nao consegui processar o arquivo. Tente enviar novamente em alguns instantes."
+        "⚠️ Deu um problema pra salvar o arquivo. Tenta de novo em alguns instantes."
       );
       return false;
     }
@@ -800,7 +810,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const tipoServico = TIPO_SERVICO_OPTIONS[text];
     if (!tipoServico) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${tipoServicoMenuText(tipo)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite um numero de 1 a 7.");
       return;
     }
 
@@ -878,13 +888,13 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const media = payload.media;
     if (!payload.hasMedia || !media?.url) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, "Envie uma foto para continuar.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "📸 Preciso de uma foto pra continuar. Manda ela aí.");
       return;
     }
 
     const contentType = media.mimetype ?? "application/octet-stream";
     if (!contentType.startsWith("image/")) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, "O arquivo precisa ser uma imagem. Envie uma foto para continuar.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Isso nao e uma foto. Envie uma imagem (jpg ou png).");
       return;
     }
 
@@ -893,6 +903,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const objectPath = buildStoragePath({
         empresaId: state.selectedEmpresaId,
         userId,
+        obraId: state.selectedObraId,
         messageId: payload.id,
         filename: media.filename,
         contentType
@@ -927,13 +938,13 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         pendingEntradaId: entrada.id
       });
 
-      await this.sendWithHeader(chatId, state.selectedObraNome, "Foto recebida. Agora envie a descricao.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "📸 Foto recebida! 📝 Agora me conta o que foi feito.");
     } catch (error) {
       console.error("Failed to process WhatsApp photo", error);
       await this.sendWithHeader(
         chatId,
         state.selectedObraNome,
-        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+        "⚠️ Deu um problema pra salvar a foto. Tenta enviar de novo em alguns instantes."
       );
     }
   }
@@ -946,13 +957,53 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     if (!text) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, "Envie uma descricao em texto para concluir.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "📝 Preciso de uma descricao em texto pra concluir.");
       return;
     }
 
     await this.deps.store.updateEntradaDescription(state.pendingEntradaId, text);
-    await this.deps.store.clearState(chatId);
-    await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
+
+    if (!state.selectedObraId || !state.selectedObraNome) {
+      await this.deps.store.clearState(chatId);
+      await this.deps.messaging.sendText(chatId, "✅ Registro salvo! Já tá no diario da obra.");
+      return;
+    }
+
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164: state.phoneE164,
+      step: "AWAITING_POST_SAVE_CHOICE",
+      selectedNumeroProcedimento: null,
+      pendingEntradaId: null
+    });
+    await this.sendWithHeader(chatId, state.selectedObraNome, postSaveMenuText());
+  }
+
+  private async handlePostSaveChoice(
+    chatId: string,
+    phoneE164: string,
+    userId: number,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    if (!tipo || !state.selectedObraId || !state.selectedObraNome) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    if (text === POST_SAVE_OPTIONS.novoRegistro) {
+      await this.resolveEmpresaForAdd(chatId, phoneE164, userId, state, tipo);
+      return;
+    }
+
+    if (text === POST_SAVE_OPTIONS.voltarMenu) {
+      await this.goToMainMenu(chatId, phoneE164, state.selectedObraId, state.selectedObraNome);
+      return;
+    }
+
+    await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Digite 1 pra incluir outro registro ou 2 pra voltar ao menu.");
   }
 
   private async handleMaterialOs(
@@ -1002,9 +1053,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       chatId,
       userId,
       empresaId: state.selectedEmpresaId,
+      obraId: state.selectedObraId,
       payload,
-      missingMessage: "Envie a foto da nota para continuar.",
-      invalidMessage: "O arquivo precisa ser uma imagem. Envie a foto da nota."
+      missingMessage: "📸 Preciso da foto da nota pra continuar.",
+      invalidMessage: "⚠️ Isso nao e uma foto. Envie uma imagem (jpg ou png)."
     });
     if (!objectPath) {
       return;
@@ -1042,7 +1094,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       await this.sendWithHeader(
         chatId,
         state.selectedObraNome,
-        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+        "⚠️ Deu um problema pra salvar a foto. Tenta enviar de novo em alguns instantes."
       );
     }
   }
@@ -1070,9 +1122,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       chatId,
       userId,
       empresaId: state.selectedEmpresaId,
+      obraId: state.selectedObraId,
       payload,
-      missingMessage: "Envie a foto do material para continuar.",
-      invalidMessage: "O arquivo precisa ser uma imagem. Envie a foto do material."
+      missingMessage: "📸 Preciso da foto do material pra continuar.",
+      invalidMessage: "⚠️ Isso nao e uma foto. Envie uma imagem (jpg ou png)."
     });
     if (!objectPath) {
       return;
@@ -1099,7 +1152,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       await this.sendWithHeader(
         chatId,
         state.selectedObraNome,
-        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+        "⚠️ Deu um problema pra salvar a foto. Tenta enviar de novo em alguns instantes."
       );
     }
   }
@@ -1117,7 +1170,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const answer = parseMaterialAnswer(text);
     if (!answer) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${materialQuantityPromptText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Digite 1 pra Sim ou 2 pra Não.");
       return;
     }
 
@@ -1157,7 +1210,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const qualidadeCorreta = parseMaterialAnswer(text);
     if (!qualidadeCorreta) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${materialQualityPromptText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Digite 1 pra Sim ou 2 pra Não.");
       return;
     }
 
@@ -1166,13 +1219,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       buildMaterialDescription(quantidadeCorreta, qualidadeCorreta)
     );
     await this.deps.store.clearState(chatId);
-    await this.deps.messaging.sendText(chatId, "Registro salvo com sucesso.");
+    await this.deps.messaging.sendText(chatId, "✅ Recebimento de material registrado! Bom trabalho.");
   }
 
   private async uploadMaterialImage(input: {
     chatId: string;
     userId: number;
     empresaId: bigint;
+    obraId?: number | null;
     payload: WahaMessagePayload;
     missingMessage: string;
     invalidMessage: string;
@@ -1194,6 +1248,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const objectPath = buildStoragePath({
         empresaId: input.empresaId,
         userId: input.userId,
+        obraId: input.obraId,
         messageId: input.payload.id,
         filename: media.filename,
         contentType
@@ -1210,7 +1265,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       console.error("Failed to process WhatsApp material receipt photo", error);
       await this.deps.messaging.sendText(
         input.chatId,
-        "Nao consegui processar a foto. Tente enviar novamente em alguns instantes."
+        "⚠️ Deu um problema pra salvar a foto. Tenta enviar de novo em alguns instantes."
       );
       return null;
     }
@@ -1262,7 +1317,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         selectedEmpresaId: empresas[0].id,
         pendingEntradaId: null
       });
-      await this.sendWithHeader(chatId, obraNome, "Informe a data do relatorio no formato DD/MM/AAAA.");
+      await this.sendWithHeader(chatId, obraNome, "📄 Qual data voce quer no relatorio? Formato: DD/MM/AAAA");
       return;
     }
 
@@ -1295,7 +1350,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const selectedIndex = Number(text) - 1;
     const empresa = Number.isInteger(selectedIndex) ? empresas[selectedIndex] : undefined;
     if (!empresa) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Opcao invalida.\n\n${this.empresaMenuText(empresas)}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite o numero da empresa na lista acima.");
       return;
     }
 
@@ -1307,7 +1362,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedEmpresaId: empresa.id,
       pendingEntradaId: null
     });
-    await this.sendWithHeader(chatId, state.selectedObraNome, "Informe a data do relatorio no formato DD/MM/AAAA.");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "📄 Qual data voce quer no relatorio? Formato: DD/MM/AAAA");
   }
 
   private async handleReportDate(
@@ -1324,11 +1379,11 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     const dateRange = parseReportDate(text);
     if (!dateRange) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, "Data invalida. Informe a data no formato DD/MM/AAAA.");
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi essa data. Use o formato DD/MM/AAAA.");
       return;
     }
 
-    await this.sendWithHeader(chatId, state.selectedObraNome, "Gerando relatorio, aguarde...");
+    await this.sendWithHeader(chatId, state.selectedObraNome, "📄 Gerando o relatorio, so um instante...");
 
     const entradas = await this.deps.store.findEntradasForReport({
       empresaId: state.selectedEmpresaId,
@@ -1340,7 +1395,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     if (entradas.length === 0) {
       await this.deps.store.clearState(chatId);
-      await this.sendWithHeader(chatId, state.selectedObraNome, `Nenhum registro encontrado para ${text}.\n\n${mainMenuText()}`);
+      await this.sendWithHeader(chatId, state.selectedObraNome, `📄 Nenhum registro encontrado em ${text}.\n\n${mainMenuText()}`);
       return;
     }
 
@@ -1407,7 +1462,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       .map((empresa, index) => `${index + 1}) ${empresa.nome ?? `Empresa ${empresa.id.toString()}`}`)
       .join("\n");
 
-    return `Escolha a empresa:\n${options}\n\nDigite 0 para voltar ao menu.`;
+    return `🏢 Qual empresa?\n${options}\n\nDigite o numero da empresa.`;
   }
 }
 
@@ -1580,6 +1635,7 @@ function parseSaoPauloDateTime(match: RegExpMatchArray): Date | null {
 function buildStoragePath(input: {
   empresaId: bigint;
   userId: number;
+  obraId?: number | null;
   messageId?: string;
   filename?: string | null;
   contentType: string;
@@ -1588,8 +1644,9 @@ function buildStoragePath(input: {
   const extension = extensionFrom(input.filename, input.contentType);
   const messageId = input.messageId ?? `${Date.now()}`;
   const safeMessageId = messageId.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const obraSegment = input.obraId != null ? `obras/${input.obraId}` : "obras/sem-obra";
 
-  return `entradas/${input.empresaId.toString()}/${input.userId}/${date}/${safeMessageId}.${extension}`;
+  return `entradas/${input.empresaId.toString()}/${obraSegment}/${date}/${input.userId}_${safeMessageId}.${extension}`;
 }
 
 function extensionFrom(filename: string | null | undefined, contentType: string): string {

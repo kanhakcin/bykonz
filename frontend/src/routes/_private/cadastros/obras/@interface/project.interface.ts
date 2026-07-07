@@ -6,6 +6,8 @@ export const projectFormSchema = z.object({
   name: z.string().min(1, 'required'),
   context: z.string().optional(),
   active: z.boolean(),
+  whatsappGroupId: z.string().optional(),
+  whatsappAutoReportEnabled: z.boolean(),
 });
 
 export type ProjectFormData = z.infer<typeof projectFormSchema>;
@@ -16,6 +18,8 @@ export interface Project {
   name: string;
   context: string | null;
   active: boolean;
+  whatsappGroupId: string | null;
+  whatsappAutoReportEnabled: boolean;
 }
 
 export interface ProjectListResponse {

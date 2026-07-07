@@ -177,4 +177,42 @@ describe("PdfReportGenerator", () => {
     const result = await generator.generateReport(BASE_INPUT);
     expect(result.slice(0, 4).toString()).toBe("%PDF");
   });
+
+  it("generates a valid PDF when empresaNome is omitted (daily report across companies)", async () => {
+    const generator = new PdfReportGenerator(makeStorage());
+
+    const result = await generator.generateReport({
+      categoria: "Diario de Obra",
+      obraNome: "Obra Residencial Aurora",
+      reportDate: "22/06/2026",
+      generatedAt: new Date("2026-06-22T15:00:00Z"),
+      entradas: [
+        {
+          id: 1n,
+          description: "Parede concretada",
+          createdAt: new Date("2026-06-22T10:00:00Z"),
+          tipo: "Inspecao de servico",
+          tipoServico: "Concretagem",
+          numeroProcedimento: "PROC-45/2026",
+          empresaNome: "Empresa A",
+          usuarioNome: "Joao",
+          mediaUrls: []
+        },
+        {
+          id: 2n,
+          description: "Entrega de material",
+          createdAt: new Date("2026-06-22T11:00:00Z"),
+          tipo: "Recebimento de material",
+          tipoServico: null,
+          numeroProcedimento: null,
+          empresaNome: "Empresa B",
+          usuarioNome: "Maria",
+          mediaUrls: []
+        }
+      ]
+    });
+
+    expect(result).toBeInstanceOf(Buffer);
+    expect(result.slice(0, 4).toString()).toBe("%PDF");
+  });
 });

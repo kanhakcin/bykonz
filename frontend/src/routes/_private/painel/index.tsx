@@ -1,10 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Bell, CheckCircle2, Images, Sparkles } from 'lucide-react';
+import { Bell, CheckCircle2, Images, RefreshCw, Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import DefaultEmptyData from '@/components/default-empty-data';
 import { DefaultKPI } from '@/components/default-KPI';
 import DefaultLoading from '@/components/default-loading';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { DataSelect } from '@/components/ui/data-select';
 import { useDiaryDay } from '@/hooks/use-diary-api';
@@ -30,19 +31,24 @@ function PainelPage() {
     return now.toISOString().slice(0, 10);
   }, []);
 
-  const { data: day, isLoading, isError } = useDiaryDay(today, projectId);
+  const { data: day, isLoading, isError, isFetching, refetch } = useDiaryDay(today, projectId);
 
   return (
     <Card>
       <CardHeader title={t('painel.title')}>
-        <DataSelect
-          className="sm:max-w-72"
-          placeholder={t('select.placeholder')}
-          searchPlaceholder={t('search')}
-          value={projectId ?? day?.project.id}
-          onChange={(value) => setProjectId(typeof value === 'number' ? value : undefined)}
-          query={projectsQuery}
-        />
+        <div className="flex items-center gap-2">
+          <DataSelect
+            className="sm:max-w-72"
+            placeholder={t('select.placeholder')}
+            searchPlaceholder={t('search')}
+            value={projectId ?? day?.project.id}
+            onChange={(value) => setProjectId(typeof value === 'number' ? value : undefined)}
+            query={projectsQuery}
+          />
+          <Button variant="ghost" size="icon" aria-label={t('update')} disabled={isFetching} onClick={() => refetch()}>
+            <RefreshCw className={isFetching ? 'size-4 animate-spin' : 'size-4'} />
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (

@@ -22,11 +22,11 @@ export function isTrocarObraCommand(text: string): boolean {
 
 export function obraMenuText(obras: ObraRecord[]): string {
   const options = obras.map((obra, index) => `${index + 1}) ${obra.nome}`).join("\n");
-  return `🏗️ Em qual obra voce vai trabalhar hoje?\n${options}\n\nDigite o numero da obra.`;
+  return `🏗️ Em qual obra voce vai trabalhar hoje?\n${options}\n\n👉 Digite o numero da obra.`;
 }
 
 export function noObrasText(): string {
-  return "Nenhuma obra ativa cadastrada. Cadastre a obra no painel do gestor e tente novamente.";
+  return "⚠️ Nenhuma obra ativa encontrada.\n\nFale com o gestor pra cadastrar a obra no painel.";
 }
 
 /** Primeira linha de toda mensagem do bot: lembra o usuario onde ele esta. */
@@ -35,5 +35,5 @@ export function withObraHeader(obraNome: string, message: string): string {
 }
 
 export function obraSelecionadaText(obraNome: string): string {
-  return `✅ Voce esta na obra: ${obraNome}\n\nPara trocar de obra a qualquer momento, digite "trocar obra".`;
+  return `✅ Voce esta na obra ${obraNome}. Bom trabalho!\n\n🔄 Pra trocar de obra, digite "trocar obra" a qualquer momento.`;
 }

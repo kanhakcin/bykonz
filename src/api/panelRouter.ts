@@ -1,21 +1,26 @@
 import cors from "cors";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
-import { createPanelAuth, safeEquals } from "./panelAuth";
+import { createPanelAuth, requirePanelRole, signPanelToken, type AuthenticatedRequest } from "./panelAuth";
 import {
+  DuplicatePanelUserEmailError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
   InvalidDateError,
+  LastActivePanelUserError,
+  PanelUserPasswordRequiredError,
   ProjectInUseError,
   StandardInUseError,
   type PanelService,
+  type PanelUserInput,
+  type PanelUserRole,
   type ProjectInput,
   type StandardInput
 } from "../services/panelService";
+import { InvalidReportDateError } from "../services/dailyReportService";
 
 export interface PanelRouterOptions {
-  token: string;
+  jwtSecret: string;
   corsOrigins?: string[];
-  user?: { name?: string; role?: string; };
 }
 
 /**
@@ -34,29 +39,39 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
   );
   router.use(express.json());
 
-  const userName = options.user?.name ?? "Gestor";
-  const userRole = options.user?.role ?? "Gestor de obra";
+  router.post("/auth/login", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, password } = (req.body ?? {}) as { email?: unknown; password?: unknown };
 
-  router.post("/auth/login", (req: Request, res: Response) => {
-    const { email, password } = (req.body ?? {}) as { email?: unknown; password?: unknown };
-
-    if (typeof email !== "string" || typeof password !== "string" || !safeEquals(password, options.token)) {
-      res.status(401).json({ error: "invalid_credentials" });
-      return;
-    }
-
-    res.json({
-      token: options.token,
-      user: {
-        name: userName,
-        initials: initialsOf(userName),
-        role: userRole,
-        email
+      if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+        res.status(401).json({ error: "invalid_credentials" });
+        return;
       }
-    });
+
+      const user = await service.verifyPanelUserCredentials(email, password);
+      if (!user) {
+        res.status(401).json({ error: "invalid_credentials" });
+        return;
+      }
+
+      const token = signPanelToken({ sub: user.id, email: user.email, name: user.name, role: user.role }, options.jwtSecret);
+
+      res.json({
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          initials: initialsOf(user.name),
+          role: user.role,
+          email: user.email
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
-  router.use(createPanelAuth(options.token));
+  router.use(createPanelAuth(options.jwtSecret));
 
   router.get("/diary", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -278,6 +293,39 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  router.get("/projects/:id/report", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const date = typeof req.query.date === "string" ? req.query.date : undefined;
+      if (!date) {
+        res.status(400).json({ error: "missing_date" });
+        return;
+      }
+
+      const result = await service.getDailyReportPdf({ projectId: id, date });
+      if (!result) {
+        res.status(404).json({ error: "project_not_found" });
+        return;
+      }
+
+      const filename = `diario-obra-${id}-${date}.pdf`;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(result.buffer);
+    } catch (error) {
+      if (error instanceof InvalidReportDateError) {
+        res.status(400).json({ error: "invalid_date" });
+        return;
+      }
+      next(error);
+    }
+  });
+
   router.post("/projects", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = parseProjectInput(req.body);
@@ -338,6 +386,114 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  // ---- Panel users (accounts) registry (CRUD, admin only) -------------------
+
+  router.use("/users", requirePanelRole("ADMIN"));
+
+  router.get("/users", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listPanelUsers({ search, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const user = await service.getPanelUser(id);
+      if (!user) {
+        res.status(404).json({ error: "panel_user_not_found" });
+        return;
+      }
+
+      res.json(user);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/users", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parsePanelUserInput(req.body, { requirePassword: true });
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createPanelUser(input));
+    } catch (error) {
+      handlePanelUserError(error, res, next);
+    }
+  });
+
+  router.put("/users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parsePanelUserInput(req.body, { requirePassword: false });
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const user = await service.updatePanelUser(id, input);
+      if (!user) {
+        res.status(404).json({ error: "panel_user_not_found" });
+        return;
+      }
+
+      res.json(user);
+    } catch (error) {
+      handlePanelUserError(error, res, next);
+    }
+  });
+
+  router.delete("/users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deletePanelUser(id);
+      if (!found) {
+        res.status(404).json({ error: "panel_user_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handlePanelUserError(error, res, next);
+    }
+  });
+
+  router.get("/me", (req: AuthenticatedRequest, res: Response) => {
+    const user = req.panelUser!;
+    res.json({ id: user.sub, email: user.email, name: user.name, role: user.role, initials: initialsOf(user.name) });
+  });
+
   return router;
 }
 
@@ -366,12 +522,64 @@ function handleProjectError(error: unknown, res: Response, next: NextFunction): 
   next(error);
 }
 
+function handlePanelUserError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicatePanelUserEmailError) {
+    res.status(409).json({ error: "duplicate_email", code: "panelUser.duplicated" });
+    return;
+  }
+  if (error instanceof PanelUserPasswordRequiredError) {
+    res.status(400).json({ error: "password_required", code: "panelUser.passwordRequired" });
+    return;
+  }
+  if (error instanceof LastActivePanelUserError) {
+    res.status(409).json({ error: "last_active_user", code: "panelUser.lastActive" });
+    return;
+  }
+  next(error);
+}
+
+const PANEL_USER_ROLES: PanelUserRole[] = ["ADMIN", "MANAGER"];
+
+function parsePanelUserInput(body: unknown, options: { requirePassword: boolean }): PanelUserInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { email, name, role, active, password } = body as Record<string, unknown>;
+  if (typeof email !== "string" || email.trim() === "" || email.length > 200) {
+    return null;
+  }
+  if (typeof name !== "string" || name.trim() === "" || name.length > 200) {
+    return null;
+  }
+  if (typeof role !== "string" || !PANEL_USER_ROLES.includes(role as PanelUserRole)) {
+    return null;
+  }
+  if (active !== undefined && typeof active !== "boolean") {
+    return null;
+  }
+  if (password !== undefined && (typeof password !== "string" || password.length < 8)) {
+    return null;
+  }
+  if (options.requirePassword && !password) {
+    return null;
+  }
+
+  return {
+    email: email.trim(),
+    name: name.trim(),
+    role: role as PanelUserRole,
+    active: active ?? true,
+    password: password as string | undefined
+  };
+}
+
 function parseProjectInput(body: unknown): ProjectInput | null {
   if (typeof body !== "object" || body === null) {
     return null;
   }
 
-  const { code, name, context, active } = body as Record<string, unknown>;
+  const { code, name, context, active, whatsappGroupId, whatsappAutoReportEnabled } = body as Record<string, unknown>;
   if (typeof code !== "string" || code.trim() === "" || code.length > 30) {
     return null;
   }
@@ -384,12 +592,20 @@ function parseProjectInput(body: unknown): ProjectInput | null {
   if (active !== undefined && typeof active !== "boolean") {
     return null;
   }
+  if (!isOptionalString(whatsappGroupId, 100)) {
+    return null;
+  }
+  if (whatsappAutoReportEnabled !== undefined && typeof whatsappAutoReportEnabled !== "boolean") {
+    return null;
+  }
 
   return {
     code: code.trim(),
     name: name.trim(),
     context: normalizeOptional(context),
-    active: active ?? true
+    active: active ?? true,
+    whatsappGroupId: normalizeOptional(whatsappGroupId as string | null | undefined),
+    whatsappAutoReportEnabled: whatsappAutoReportEnabled ?? false
   };
 }
 

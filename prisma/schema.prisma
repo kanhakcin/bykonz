@@ -21,6 +21,7 @@ enum ConversationStep {
   SELECT_EMPRESA
   AWAITING_PHOTO
   AWAITING_DESCRIPTION
+  AWAITING_POST_SAVE_CHOICE
   AWAITING_INSPECT_DATE
   SELECT_EMPRESA_FOR_REPORT
   AWAITING_REPORT_DATE
@@ -76,6 +77,11 @@ enum PersonStatus {
   ACTIVE
   ON_LEAVE
   TERMINATED
+}
+
+enum PanelUserRole {
+  ADMIN
+  MANAGER
 }
 
 enum InspectionResult {
@@ -164,15 +170,17 @@ model Company {
 }
 
 model Project {
-  id         Int      @id @default(autoincrement())
-  companyId  BigInt   @map("company_id")
-  sectorId   Int      @map("sector_id")
-  code       String
-  name       String
-  status     String   @default("ACTIVE")
-  attributes Json?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                        Int      @id @default(autoincrement())
+  companyId                 BigInt   @map("company_id")
+  sectorId                  Int      @map("sector_id")
+  code                      String
+  name                      String
+  status                    String   @default("ACTIVE")
+  attributes                Json?
+  whatsappGroupId           String?  @map("whatsapp_group_id")
+  whatsappAutoReportEnabled Boolean  @default(false) @map("whatsapp_auto_report_enabled")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
   sector   Sector    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
@@ -364,6 +372,25 @@ model MachineInspectionItem {
 
   @@unique([inspectionId, checklistItemId])
   @@map("machine_inspection_items")
+}
+
+// ---------------------------------------------------------------------------
+// Manager panel accounts — distinct from `User` (WhatsApp bot operators) and
+// from `people` (workforce cited in captions). Login credentials for the
+// web panel only.
+// ---------------------------------------------------------------------------
+
+model PanelUser {
+  id           Int           @id @default(autoincrement())
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  name         String
+  role         PanelUserRole @default(MANAGER)
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("panel_users")
 }
 
 // ---------------------------------------------------------------------------

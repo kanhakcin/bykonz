@@ -2,10 +2,9 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 /**
- * Auth v1: token opaco (PANEL_API_TOKEN), sem JWT/refresh.
- * setAuth recebe o usuário já resolvido pelo backend no login — não há
- * decodificação de token. Quando o backend migrar para JWT real, trocar
- * aqui para decodificar o token em vez de receber `user` como parâmetro.
+ * Token JWT assinado por usuário (PanelUser). setAuth recebe o usuário já
+ * resolvido pelo backend no login — o token em si não é decodificado aqui,
+ * só enviado como Bearer nas próximas requisições.
  */
 export const useAuth = create<AuthStore>()(
   persist(
@@ -38,9 +37,10 @@ export const useAuth = create<AuthStore>()(
 );
 
 export interface AuthUser {
+  id: number;
   name: string;
   initials: string;
-  role: string;
+  role: 'ADMIN' | 'MANAGER';
   email: string;
 }
 

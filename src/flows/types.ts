@@ -8,6 +8,7 @@ export type FlowStep =
   | "AWAITING_PROCEDURE_NUMBER"
   | "AWAITING_PHOTO"
   | "AWAITING_DESCRIPTION"
+  | "AWAITING_POST_SAVE_CHOICE"
   | "AWAITING_INSPECT_DATE"
   | "SELECT_EMPRESA_FOR_REPORT"
   | "AWAITING_REPORT_DATE"
@@ -99,11 +100,19 @@ export interface EntradaForReport {
 
 export interface ReportInput {
   categoria: string;
-  empresaNome: string;
+  empresaNome?: string | null;
   obraNome?: string | null;
   reportDate: string;
   generatedAt: Date;
   entradas: EntradaForReport[];
+}
+
+export interface ObraForReport {
+  id: number;
+  nome: string;
+  whatsappGroupId: string | null;
+  whatsappAutoReportEnabled: boolean;
+  status: string;
 }
 
 export interface ConversationStore {
@@ -124,6 +133,9 @@ export interface ConversationStore {
     dateStart: Date;
     dateEnd: Date;
   }): Promise<EntradaForReport[]>;
+  findEntradasForObraDay(input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]>;
+  findObraById(obraId: number): Promise<ObraForReport | null>;
+  findObrasForAutoReport(): Promise<ObraForReport[]>;
 }
 
 export interface MessagingClient {

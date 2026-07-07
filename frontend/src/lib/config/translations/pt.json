@@ -165,6 +165,12 @@
   "permissions_access": "Permissões e Acesso",
   "preferences_config": "Preferências e Configuração",
   "project.duplicated": "Já existe uma obra com este código",
+  "project.whatsappGroupId": "Grupo do WhatsApp",
+  "project.whatsappGroupId.help": "ID do grupo do WhatsApp que receberá o diário de obra (ex: 1203630xxxxx@g.us)",
+  "project.whatsappAutoReportEnabled": "Enviar diário de obra automaticamente via WhatsApp",
+  "relatorios.dailyPdf.project": "Obra",
+  "relatorios.dailyPdf.date": "Data",
+  "relatorios.dailyPdf.download": "Baixar PDF",
   "register.customers": "Cadastro de Clientes",
   "role.request.error": "Erro ao processar a solicitação.",
   "search.placeholder": "Digite aqui para buscar",
@@ -244,5 +250,14 @@
   "users.preferences.description": "Notificações e configurações de acesso específicas por cliente.",
   "permissions.access.description": "Atribua funções e defina restrições de acesso específicas por cliente.",
   "message.description.placeholder": "Informe a descrição",
-  "machine.idEnterprise.placeholder": "Selecione uma empresa"
+  "machine.idEnterprise.placeholder": "Selecione uma empresa",
+  "email.invalid": "Email inválido",
+  "cadastros.tile.panelUsers": "Usuários do painel",
+  "panelUser.role.ADMIN": "Administrador",
+  "panelUser.role.MANAGER": "Gestor",
+  "panelUser.password": "Senha",
+  "panelUser.password.optional": "Nova senha (opcional)",
+  "panelUser.duplicated": "Já existe um usuário com este email",
+  "panelUser.passwordRequired": "Senha é obrigatória",
+  "panelUser.lastActive": "Não é possível remover ou desativar o último usuário ativo"
 }

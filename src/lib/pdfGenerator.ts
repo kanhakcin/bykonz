@@ -23,7 +23,9 @@ export class PdfReportGenerator implements PdfGenerator {
     doc.fontSize(14).font("Helvetica-Bold").text("Relatorio", { align: "center" });
     doc.font("Helvetica").fontSize(10);
     doc.moveDown(0.5);
-    doc.text(`Empresa: ${input.empresaNome}`);
+    if (input.empresaNome) {
+      doc.text(`Empresa: ${input.empresaNome}`);
+    }
     if (input.obraNome) {
       doc.text(`Obra: ${input.obraNome}`);
     }
@@ -41,6 +43,14 @@ export class PdfReportGenerator implements PdfGenerator {
       const author = entrada.usuarioNome ?? "Desconhecido";
 
       doc.fontSize(10).font("Helvetica-Bold").text(`${time} - ${author}`);
+
+      if (entrada.tipo) {
+        doc.font("Helvetica-Oblique").fontSize(9).text(`Categoria: ${entrada.tipo}`);
+      }
+
+      if (entrada.empresaNome) {
+        doc.font("Helvetica-Oblique").fontSize(9).text(`Empresa: ${entrada.empresaNome}`);
+      }
 
       if (entrada.treinamentoTema) {
         doc.font("Helvetica").text(`Tema do treinamento: ${entrada.treinamentoTema}`);

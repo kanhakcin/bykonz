@@ -113,6 +113,12 @@
   "lost.password": "Forget the password?",
   "no.connection": "Lost connection. Verify your connection and try again!",
   "project.inUse": "Project with diary entries cannot be deleted",
+  "project.whatsappGroupId": "WhatsApp group",
+  "project.whatsappGroupId.help": "ID of the WhatsApp group that will receive the daily report (e.g. 1203630xxxxx@g.us)",
+  "project.whatsappAutoReportEnabled": "Automatically send daily report via WhatsApp",
+  "relatorios.dailyPdf.project": "Project",
+  "relatorios.dailyPdf.date": "Date",
+  "relatorios.dailyPdf.download": "Download PDF",
   "user.customer": "Customer User",
   "user.disabled": "User disabled",
   "access_control": "Access Control",
@@ -244,5 +250,14 @@
   "users.preferences.description": "Notifications and customer-specific access configurations.",
   "permissions.access.description": "Assign roles and define customer-specific access restrictions.",
   "message.description.placeholder": "Enter the description",
-  "machine.idEnterprise.placeholder": "Select enterprise"
+  "machine.idEnterprise.placeholder": "Select enterprise",
+  "email.invalid": "Invalid email",
+  "cadastros.tile.panelUsers": "Panel users",
+  "panelUser.role.ADMIN": "Administrator",
+  "panelUser.role.MANAGER": "Manager",
+  "panelUser.password": "Password",
+  "panelUser.password.optional": "New password (optional)",
+  "panelUser.duplicated": "A user with this email already exists",
+  "panelUser.passwordRequired": "Password is required",
+  "panelUser.lastActive": "Cannot remove or deactivate the last active user"
 }

@@ -1,8 +1,11 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { createApp, type WebhookHandler } from "../src/app";
 import { createPanelRouter } from "../src/api/panelRouter";
+import { signPanelToken } from "../src/api/panelAuth";
 import {
+  DuplicatePanelUserEmailError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
   PanelService,
@@ -10,8 +13,14 @@ import {
   StandardInUseError,
   type AlertRecord,
   type CodeRef,
+  type DailyReportGenerator,
   type EntryRecord,
   type PanelStore,
+  type PanelUserListInput,
+  type PanelUserListItem,
+  type PanelUserListResult,
+  type PanelUserRecord,
+  type PanelUserRole,
   type PersonRef,
   type ProjectInput,
   type ProjectListInput,
@@ -23,8 +32,9 @@ import {
   type StandardListResult,
   type StandardRecord
 } from "../src/services/panelService";
+import { InvalidReportDateError } from "../src/services/dailyReportService";
 
-const TOKEN = "test-token";
+const JWT_SECRET = "test-secret";
 const ORIGIN = "http://localhost:5173";
 
 class FakeWebhookHandler implements WebhookHandler {
@@ -55,17 +65,53 @@ class FakePanelStore implements PanelStore {
   people: PersonRef[] = [{ id: 118, name: "José Pereira", registrationCode: "MAT-118" }];
   machines: CodeRef[] = [{ id: 7, code: "MX-007" }];
   assets: CodeRef[] = [];
+  panelUsers: PanelUserRecord[] = [];
+  private nextPanelUserId = 1;
 
   constructor() {
     this.reset();
   }
 
   reset(): void {
+    this.nextPanelUserId = 1;
+    this.panelUsers = [
+      {
+        id: this.nextPanelUserId++,
+        email: "gestor@tanen.com.br",
+        passwordHash: bcrypt.hashSync("correct-password", 4),
+        name: "Ricardo Tanen",
+        role: "ADMIN",
+        active: true
+      },
+      {
+        id: this.nextPanelUserId++,
+        email: "inativo@tanen.com.br",
+        passwordHash: bcrypt.hashSync("correct-password", 4),
+        name: "Usuário Inativo",
+        role: "MANAGER",
+        active: false
+      }
+    ];
+
     this.nextProjectId = 1;
     this.projectsInUse = new Set([1]);
     this.projectItems = [
-      this.buildProject({ code: "AUR", name: "Obra Residencial Aurora", context: "Apto 1403 · Laje tipo 04", active: true }),
-      this.buildProject({ code: "BSV", name: "Obra Boulevard Sete Vidas", context: null, active: false })
+      this.buildProject({
+        code: "AUR",
+        name: "Obra Residencial Aurora",
+        context: "Apto 1403 · Laje tipo 04",
+        active: true,
+        whatsappGroupId: null,
+        whatsappAutoReportEnabled: false
+      }),
+      this.buildProject({
+        code: "BSV",
+        name: "Obra Boulevard Sete Vidas",
+        context: null,
+        active: false,
+        whatsappGroupId: null,
+        whatsappAutoReportEnabled: false
+      })
     ];
 
     this.nextStandardId = 1;
@@ -351,6 +397,76 @@ class FakePanelStore implements PanelStore {
       throw new DuplicateProjectCodeError(code);
     }
   }
+
+  async listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.panelUsers
+      .filter((u) => !search || u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size).map(toPanelUserListItem),
+      totalCount: filtered.length
+    };
+  }
+
+  async findPanelUserById(id: number): Promise<PanelUserListItem | null> {
+    const user = this.panelUsers.find((u) => u.id === id);
+    return user ? toPanelUserListItem(user) : null;
+  }
+
+  async findPanelUserByEmail(email: string): Promise<PanelUserRecord | null> {
+    return this.panelUsers.find((u) => u.email === email) ?? null;
+  }
+
+  async createPanelUser(input: { email: string; name: string; role: PanelUserRole; active: boolean; passwordHash: string }): Promise<PanelUserListItem> {
+    this.assertUniquePanelUserEmail(input.email);
+    const user: PanelUserRecord = { id: this.nextPanelUserId++, ...input };
+    this.panelUsers.push(user);
+    return toPanelUserListItem(user);
+  }
+
+  async updatePanelUser(
+    id: number,
+    input: { email: string; name: string; role: PanelUserRole; active: boolean; passwordHash?: string }
+  ): Promise<PanelUserListItem | null> {
+    const user = this.panelUsers.find((u) => u.id === id);
+    if (!user) {
+      return null;
+    }
+    this.assertUniquePanelUserEmail(input.email, id);
+    user.email = input.email;
+    user.name = input.name;
+    user.role = input.role;
+    user.active = input.active;
+    if (input.passwordHash) {
+      user.passwordHash = input.passwordHash;
+    }
+    return toPanelUserListItem(user);
+  }
+
+  async deletePanelUser(id: number): Promise<boolean> {
+    const index = this.panelUsers.findIndex((u) => u.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.panelUsers.splice(index, 1);
+    return true;
+  }
+
+  async countActivePanelUsers(excludingId?: number): Promise<number> {
+    return this.panelUsers.filter((u) => u.active && u.id !== excludingId).length;
+  }
+
+  private assertUniquePanelUserEmail(email: string, exceptId?: number): void {
+    if (this.panelUsers.some((u) => u.email === email && u.id !== exceptId)) {
+      throw new DuplicatePanelUserEmailError(email);
+    }
+  }
+}
+
+function toPanelUserListItem(user: PanelUserRecord): PanelUserListItem {
+  return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active };
 }
 
 let store: FakePanelStore;
@@ -362,19 +478,39 @@ const storage = {
   }
 };
 
+class FakeDailyReportGenerator implements DailyReportGenerator {
+  async generateForObraDay(input: { obraId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      throw new InvalidReportDateError(input.date);
+    }
+    if (input.obraId !== 1) {
+      return null;
+    }
+    return { buffer: Buffer.from("%PDF-fake"), totalEntradas: 2 };
+  }
+}
+
 function buildApp() {
   store = new FakePanelStore();
   storage.downloads = [];
-  const service = new PanelService(store, { timezoneOffset: "-03:00", mediaStorage: storage });
+  const service = new PanelService(store, {
+    timezoneOffset: "-03:00",
+    mediaStorage: storage,
+    dailyReportService: new FakeDailyReportGenerator()
+  });
   const panelRouter = createPanelRouter(service, {
-    token: TOKEN,
-    corsOrigins: [ORIGIN],
-    user: { name: "Ricardo Tanen", role: "Gestor de obra" }
+    jwtSecret: JWT_SECRET,
+    corsOrigins: [ORIGIN]
   });
   return createApp(new FakeWebhookHandler(), undefined, { panelRouter });
 }
 
-const auth = { Authorization: `Bearer ${TOKEN}` };
+function tokenFor(user: { id: number; email: string; name: string; role: PanelUserRole }): string {
+  return signPanelToken({ sub: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET);
+}
+
+const adminToken = tokenFor({ id: 1, email: "gestor@tanen.com.br", name: "Ricardo Tanen", role: "ADMIN" });
+const auth = { Authorization: `Bearer ${adminToken}` };
 
 describe("panel API auth", () => {
   it("rejects requests without a bearer token", async () => {
@@ -383,26 +519,31 @@ describe("panel API auth", () => {
     expect(res.status).toBe(401);
   });
 
-  it("rejects requests with a wrong token", async () => {
+  it("rejects requests with an invalid token", async () => {
     const app = buildApp();
     const res = await request(app).get("/api/v1/diary").set("Authorization", "Bearer wrong");
     expect(res.status).toBe(401);
   });
 
-  it("logs in with the panel token as password", async () => {
+  it("logs in with a valid email and password, returning a signed token", async () => {
     const app = buildApp();
     const res = await request(app)
       .post("/api/v1/auth/login")
-      .send({ email: "gestor@tanen.com.br", password: TOKEN });
+      .send({ email: "gestor@tanen.com.br", password: "correct-password" });
 
     expect(res.status).toBe(200);
-    expect(res.body.token).toBe(TOKEN);
+    expect(typeof res.body.token).toBe("string");
     expect(res.body.user).toMatchObject({
+      id: 1,
       name: "Ricardo Tanen",
       initials: "RT",
-      role: "Gestor de obra",
+      role: "ADMIN",
       email: "gestor@tanen.com.br"
     });
+
+    const me = await request(app).get("/api/v1/me").set("Authorization", `Bearer ${res.body.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body).toMatchObject({ id: 1, email: "gestor@tanen.com.br", role: "ADMIN" });
   });
 
   it("rejects login with a wrong password", async () => {
@@ -410,6 +551,16 @@ describe("panel API auth", () => {
     const res = await request(app)
       .post("/api/v1/auth/login")
       .send({ email: "gestor@tanen.com.br", password: "wrong" });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("invalid_credentials");
+  });
+
+  it("rejects login for an inactive user", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/auth/login")
+      .send({ email: "inativo@tanen.com.br", password: "correct-password" });
 
     expect(res.status).toBe(401);
     expect(res.body.error).toBe("invalid_credentials");
@@ -803,8 +954,29 @@ describe("projects CRUD", () => {
       .send({ code: " CDL ", title: undefined, name: " Obra Candelária ", context: "  " });
 
     expect(res.status).toBe(201);
-    expect(res.body).toMatchObject({ code: "CDL", name: "Obra Candelária", context: null, active: true });
+    expect(res.body).toMatchObject({
+      code: "CDL",
+      name: "Obra Candelária",
+      context: null,
+      active: true,
+      whatsappGroupId: null,
+      whatsappAutoReportEnabled: false
+    });
     expect(store.projectItems).toHaveLength(3);
+  });
+
+  it("creates a project with a whatsapp group and auto-report enabled", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects")
+      .set(auth)
+      .send({ code: "CDL", name: "Obra Candelária", whatsappGroupId: "1203630xxxxx@g.us", whatsappAutoReportEnabled: true });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      whatsappGroupId: "1203630xxxxx@g.us",
+      whatsappAutoReportEnabled: true
+    });
   });
 
   it("rejects an invalid payload", async () => {
@@ -861,5 +1033,200 @@ describe("projects CRUD", () => {
     const app = buildApp();
     const res = await request(app).get("/api/v1/projects");
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/v1/projects/:id/report", () => {
+  it("returns 400 for a non-numeric id", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/abc/report?date=2026-07-03").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_id");
+  });
+
+  it("returns 400 when the date is missing", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/1/report").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("missing_date");
+  });
+
+  it("returns 400 for a malformed date", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/1/report?date=03/07/2026").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_date");
+  });
+
+  it("returns 404 when the project does not exist", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/999/report?date=2026-07-03").set(auth);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("project_not_found");
+  });
+
+  it("returns the generated PDF for an existing project", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/1/report?date=2026-07-03").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/pdf");
+    expect(res.headers["content-disposition"]).toContain("attachment");
+    expect(res.body.slice(0, 4).toString()).toBe("%PDF");
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/1/report?date=2026-07-03");
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("panel users CRUD", () => {
+  it("lists panel users ordered by name with the total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/users").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data.map((u: { email: string }) => u.email)).toEqual(["gestor@tanen.com.br", "inativo@tanen.com.br"]);
+    expect(res.body.data[0]).not.toHaveProperty("passwordHash");
+  });
+
+  it("filters by search", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/users?search=inativo").set(auth);
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.data[0].email).toBe("inativo@tanen.com.br");
+  });
+
+  it("returns a single user and 404 for unknown ids", async () => {
+    const app = buildApp();
+
+    const found = await request(app).get("/api/v1/users/1").set(auth);
+    expect(found.status).toBe(200);
+    expect(found.body.email).toBe("gestor@tanen.com.br");
+
+    const missing = await request(app).get("/api/v1/users/999").set(auth);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe("panel_user_not_found");
+  });
+
+  it("creates a panel user with a hashed password", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/users")
+      .set(auth)
+      .send({ email: "novo@tanen.com.br", name: "Novo Gestor", role: "MANAGER", password: "senha-forte-123" });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ email: "novo@tanen.com.br", name: "Novo Gestor", role: "MANAGER", active: true });
+    expect(res.body).not.toHaveProperty("passwordHash");
+
+    const stored = store.panelUsers.find((u) => u.email === "novo@tanen.com.br");
+    expect(stored?.passwordHash).not.toBe("senha-forte-123");
+  });
+
+  it("rejects creating a user without a password", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/users")
+      .set(auth)
+      .send({ email: "novo@tanen.com.br", name: "Novo Gestor", role: "MANAGER" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_payload");
+  });
+
+  it("rejects an invalid payload", async () => {
+    const app = buildApp();
+    for (const payload of [
+      {},
+      { email: "x@x.com" },
+      { email: "", name: "x", role: "MANAGER", password: "12345678" },
+      { email: "x@x.com", name: "x", role: "OWNER", password: "12345678" },
+      { email: "x@x.com", name: "x", role: "MANAGER", password: "short" }
+    ]) {
+      const res = await request(app).post("/api/v1/users").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 409 with an i18n code for a duplicated email", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/users")
+      .set(auth)
+      .send({ email: "gestor@tanen.com.br", name: "Duplicado", role: "MANAGER", password: "senha-forte-123" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_email", code: "panelUser.duplicated" });
+  });
+
+  it("updates a user without changing the password when omitted", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/users/1")
+      .set(auth)
+      .send({ email: "gestor@tanen.com.br", name: "Ricardo T. Alves", role: "ADMIN", active: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 1, name: "Ricardo T. Alves" });
+
+    const login = await request(app).post("/api/v1/auth/login").send({ email: "gestor@tanen.com.br", password: "correct-password" });
+    expect(login.status).toBe(200);
+  });
+
+  it("returns 404 when updating an unknown user", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/users/999")
+      .set(auth)
+      .send({ email: "x@x.com", name: "X", role: "MANAGER", active: true });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses to deactivate the last active user", async () => {
+    const app = buildApp();
+    // O único outro usuário (inativo@tanen.com.br) já está inativo.
+    const res = await request(app)
+      .put("/api/v1/users/1")
+      .set(auth)
+      .send({ email: "gestor@tanen.com.br", name: "Ricardo Tanen", role: "ADMIN", active: false });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "last_active_user", code: "panelUser.lastActive" });
+  });
+
+  it("deletes a panel user", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/users/2").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(store.panelUsers.map((u) => u.id)).toEqual([1]);
+  });
+
+  it("refuses to delete the last active user", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/users/1").set(auth);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "last_active_user", code: "panelUser.lastActive" });
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/users");
+    expect(res.status).toBe(401);
+  });
+
+  it("forbids non-admin users from managing panel users", async () => {
+    const app = buildApp();
+    const managerToken = tokenFor({ id: 2, email: "inativo@tanen.com.br", name: "Usuário Inativo", role: "MANAGER" });
+
+    const res = await request(app).get("/api/v1/users").set("Authorization", `Bearer ${managerToken}`);
+    expect(res.status).toBe(403);
   });
 });

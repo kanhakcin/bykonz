@@ -19,6 +19,8 @@ export function useProjectForm(initialData?: ProjectFormData) {
       name: '',
       context: '',
       active: true,
+      whatsappGroupId: '',
+      whatsappAutoReportEnabled: false,
       ...initialData,
     },
   });

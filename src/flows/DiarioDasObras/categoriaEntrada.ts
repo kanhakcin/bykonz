@@ -29,11 +29,11 @@ export function isTipoServico(value: string | null | undefined): value is TipoSe
 
 export function tipoServicoMenuText(tipo: EntryTipo): string {
   const options = TIPO_SERVICOS.map((tipoServico, index) => `${index + 1}) ${tipoServico}`).join("\n");
-  return `${tipo}\nEscolha o tipo de serviço:\n${options}\n\nDigite 0 para voltar ao menu.`;
+  return `🔧 ${tipo}\nQual o tipo de serviço?\n\n${options}\n\nDigite o numero.`;
 }
 
 export function numeroProcedimentoPromptText(): string {
-  return "Informe o número do procedimento utilizado.";
+  return "📝 Qual o número do procedimento utilizado?\nEx: PS-031";
 }
 
 export function photoPromptText(
@@ -43,6 +43,6 @@ export function photoPromptText(
   numeroProcedimento: string
 ): string {
   const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
-  return `${tipo} - ${empresaNome}\nTipo de serviço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\nEnvie uma foto para incluir no registro.`;
+  return `🔧 ${tipo} - ${empresaNome}\nServiço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\n\n📸 Agora envie uma foto pra continuar.`;
 }
 

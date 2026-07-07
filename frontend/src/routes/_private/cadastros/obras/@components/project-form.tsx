@@ -73,6 +73,41 @@ export function ProjectForm() {
         />,
       ],
     },
+    {
+      title: 'WhatsApp',
+      fields: [
+        <FormField
+          key="whatsappGroupId"
+          control={form.control}
+          name="whatsappGroupId"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('project.whatsappGroupId')}</FormLabel>
+              <FormControl>
+                <Input {...field} maxLength={100} placeholder="1203630xxxxx@g.us" />
+              </FormControl>
+              <p className="text-muted-foreground text-sm">{t('project.whatsappGroupId.help')}</p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />,
+        <FormField
+          key="whatsappAutoReportEnabled"
+          control={form.control}
+          name="whatsappAutoReportEnabled"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+              <FormControl>
+                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+              </FormControl>
+              <div className="space-y-1 leading-none">
+                <FormLabel>{t('project.whatsappAutoReportEnabled')}</FormLabel>
+              </div>
+            </FormItem>
+          )}
+        />,
+      ],
+    },
   ];
 
   return <DefaultFormLayout sections={sections} />;

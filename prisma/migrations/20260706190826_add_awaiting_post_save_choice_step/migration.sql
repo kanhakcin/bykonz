@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ConversationStep" ADD VALUE 'AWAITING_POST_SAVE_CHOICE';

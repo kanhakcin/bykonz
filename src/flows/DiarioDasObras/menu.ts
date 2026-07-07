@@ -25,19 +25,39 @@ export const INCLUDE_ONLY_ACTION_OPTIONS = {
   incluir: "1"
 };
 
+export const POST_SAVE_OPTIONS = {
+  novoRegistro: "1",
+  voltarMenu: "2"
+};
+
+const MAIN_MENU_OPTION_EMOJI: Record<string, string> = {
+  "Inspecao de servico": "🔧",
+  "Abrir nao conformidade": "⚠️",
+  "Recebimento de material": "📦",
+  "Plano de manutencao": "🛠️",
+  "Programa sol": "☀️",
+  Treinamento: "🎓",
+  [DIARIO_OBRA_REPORT_LABEL]: "📄"
+};
+
 export function isEntryTipo(value: string | null | undefined): value is EntryTipo {
   return typeof value === "string" && (ENTRY_TIPOS as readonly string[]).includes(value);
 }
 
 export function mainMenuText(): string {
-  const options = MAIN_MENU_OPTIONS.map((option) => `${option.option}) ${option.label}`).join("\n");
-  return `O que voce quer acessar?\n${options}\n\nDigite 0 para voltar ao menu.`;
+  const options = MAIN_MENU_OPTIONS.map((option) => `${MAIN_MENU_OPTION_EMOJI[option.label]} ${option.option}) ${option.label}`).join("\n");
+  return `👋 O que voce quer fazer agora?\n\n${options}\n\nDigite o numero da opcao.`;
 }
 
 export function actionMenuText(tipo: EntryTipo): string {
+  const emoji = MAIN_MENU_OPTION_EMOJI[tipo] ?? "🔧";
   if (usesIncludeOnlyActionMenu(tipo)) {
-    return `${tipo}\n1) Incluir\n\nDigite 0 para voltar ao menu.`;
+    return `${emoji} ${tipo}\n\n1) Incluir novo registro\n0) Voltar ao menu`;
   }
 
-  return `${tipo}\n1) Consulta\n2) Incluir\n\nDigite 0 para voltar ao menu.`;
+  return `${emoji} ${tipo}\n\n1) Consultar registros\n2) Incluir novo registro\n0) Voltar ao menu`;
+}
+
+export function postSaveMenuText(): string {
+  return "✅ Registro salvo! Já tá no diario da obra.\n\n1) Incluir outro registro\n2) Voltar ao menu";
 }

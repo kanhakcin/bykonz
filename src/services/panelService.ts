@@ -7,6 +7,10 @@
  * descriptions) remain pt-BR content.
  */
 
+import bcrypt from "bcryptjs";
+
+const PASSWORD_SALT_ROUNDS = 12;
+
 export type EntityType = "STANDARD" | "PERSON" | "MACHINE" | "ASSET";
 export type MentionSource = "CODE" | "AI" | "MANUAL" | "QR";
 export type AlertType =
@@ -83,6 +87,8 @@ export interface ProjectListItem {
   name: string;
   context: string | null;
   active: boolean;
+  whatsappGroupId: string | null;
+  whatsappAutoReportEnabled: boolean;
 }
 
 export interface ProjectInput {
@@ -90,6 +96,8 @@ export interface ProjectInput {
   name: string;
   context: string | null;
   active: boolean;
+  whatsappGroupId: string | null;
+  whatsappAutoReportEnabled: boolean;
 }
 
 export interface ProjectListInput {
@@ -135,6 +143,47 @@ export interface StandardListResult {
   totalCount: number;
 }
 
+// ---- Panel users (manager panel accounts) ----------------------------------
+
+export type PanelUserRole = "ADMIN" | "MANAGER";
+
+export interface PanelUserRecord {
+  id: number;
+  email: string;
+  passwordHash: string;
+  name: string;
+  role: PanelUserRole;
+  active: boolean;
+}
+
+export interface PanelUserListItem {
+  id: number;
+  email: string;
+  name: string;
+  role: PanelUserRole;
+  active: boolean;
+}
+
+export interface PanelUserInput {
+  email: string;
+  name: string;
+  role: PanelUserRole;
+  active: boolean;
+  /** Senha em texto plano; hash é responsabilidade do PanelService. */
+  password?: string;
+}
+
+export interface PanelUserListInput {
+  search?: string;
+  page: number;
+  size: number;
+}
+
+export interface PanelUserListResult {
+  data: PanelUserListItem[];
+  totalCount: number;
+}
+
 export interface PanelStore {
   getProject(projectId?: number): Promise<ProjectRecord | null>;
   findEntriesForDay(input: { projectId: number; start: Date; end: Date }): Promise<EntryRecord[]>;
@@ -158,6 +207,16 @@ export interface PanelStore {
   createProject(input: ProjectInput): Promise<ProjectListItem>;
   updateProject(id: number, input: ProjectInput): Promise<ProjectListItem | null>;
   deleteProject(id: number): Promise<boolean>;
+  listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult>;
+  findPanelUserById(id: number): Promise<PanelUserListItem | null>;
+  findPanelUserByEmail(email: string): Promise<PanelUserRecord | null>;
+  createPanelUser(input: { email: string; name: string; role: PanelUserRole; active: boolean; passwordHash: string }): Promise<PanelUserListItem>;
+  updatePanelUser(
+    id: number,
+    input: { email: string; name: string; role: PanelUserRole; active: boolean; passwordHash?: string }
+  ): Promise<PanelUserListItem | null>;
+  deletePanelUser(id: number): Promise<boolean>;
+  countActivePanelUsers(excludingId?: number): Promise<number>;
 }
 
 // ---- API DTOs ---------------------------------------------------------------
@@ -235,10 +294,18 @@ export interface DiaryMedia {
   contentType: string;
 }
 
+export interface DailyReportGenerator {
+  generateForObraDay(input: { obraId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null>;
+}
+
 export class PanelService {
   constructor(
     private readonly store: PanelStore,
-    private readonly options: { timezoneOffset?: string; mediaStorage?: PanelMediaStorage } = {}
+    private readonly options: {
+      timezoneOffset?: string;
+      mediaStorage?: PanelMediaStorage;
+      dailyReportService?: DailyReportGenerator;
+    } = {}
   ) {}
 
   private get tzOffset(): string {
@@ -435,6 +502,69 @@ export class PanelService {
     return this.store.deleteProject(id);
   }
 
+  async verifyPanelUserCredentials(email: string, password: string): Promise<PanelUserListItem | null> {
+    const user = await this.store.findPanelUserByEmail(email.trim().toLowerCase());
+    if (!user || !user.active) {
+      return null;
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      return null;
+    }
+
+    return { id: user.id, email: user.email, name: user.name, role: user.role, active: user.active };
+  }
+
+  listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult> {
+    return this.store.listPanelUsers(input);
+  }
+
+  getPanelUser(id: number): Promise<PanelUserListItem | null> {
+    return this.store.findPanelUserById(id);
+  }
+
+  async createPanelUser(input: PanelUserInput): Promise<PanelUserListItem> {
+    if (!input.password) {
+      throw new PanelUserPasswordRequiredError();
+    }
+
+    const passwordHash = await bcrypt.hash(input.password, PASSWORD_SALT_ROUNDS);
+    return this.store.createPanelUser({
+      email: input.email.trim().toLowerCase(),
+      name: input.name,
+      role: input.role,
+      active: input.active,
+      passwordHash
+    });
+  }
+
+  async updatePanelUser(id: number, input: PanelUserInput): Promise<PanelUserListItem | null> {
+    if (!input.active) {
+      const activeOthers = await this.store.countActivePanelUsers(id);
+      if (activeOthers === 0) {
+        throw new LastActivePanelUserError();
+      }
+    }
+
+    const passwordHash = input.password ? await bcrypt.hash(input.password, PASSWORD_SALT_ROUNDS) : undefined;
+    return this.store.updatePanelUser(id, {
+      email: input.email.trim().toLowerCase(),
+      name: input.name,
+      role: input.role,
+      active: input.active,
+      passwordHash
+    });
+  }
+
+  async deletePanelUser(id: number): Promise<boolean> {
+    const activeOthers = await this.store.countActivePanelUsers(id);
+    if (activeOthers === 0) {
+      throw new LastActivePanelUserError();
+    }
+    return this.store.deletePanelUser(id);
+  }
+
   async getMedia(id: bigint): Promise<DiaryMedia | null> {
     if (!this.options.mediaStorage) {
       throw new Error("Panel media storage is not configured");
@@ -449,6 +579,14 @@ export class PanelService {
       body: await this.options.mediaStorage.downloadPrivateObject(media.mediaUrl),
       contentType: media.mediaType ?? contentTypeFromPath(media.mediaUrl)
     };
+  }
+
+  async getDailyReportPdf(input: { projectId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null> {
+    if (!this.options.dailyReportService) {
+      throw new Error("Daily report service is not configured");
+    }
+
+    return this.options.dailyReportService.generateForObraDay({ obraId: input.projectId, date: input.date });
   }
 
   private todayISODate(): string {
@@ -561,6 +699,30 @@ export class ProjectInUseError extends Error {
   constructor(id: number) {
     super(`Project ${id} has diary entries and cannot be deleted`);
     this.name = "ProjectInUseError";
+  }
+}
+
+/** A panel user with the same email already exists. */
+export class DuplicatePanelUserEmailError extends Error {
+  constructor(email: string) {
+    super(`Panel user email already exists: ${email}`);
+    this.name = "DuplicatePanelUserEmailError";
+  }
+}
+
+/** Password is required when creating a panel user. */
+export class PanelUserPasswordRequiredError extends Error {
+  constructor() {
+    super("Password is required to create a panel user");
+    this.name = "PanelUserPasswordRequiredError";
+  }
+}
+
+/** The last active panel user cannot be deactivated or deleted (would lock out the panel). */
+export class LastActivePanelUserError extends Error {
+  constructor() {
+    super("Cannot deactivate or delete the last active panel user");
+    this.name = "LastActivePanelUserError";
   }
 }
 

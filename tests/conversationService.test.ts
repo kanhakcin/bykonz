@@ -9,6 +9,7 @@ import {
   type EntradaForReport,
   type MessagingClient,
   type ObjectStorage,
+  type ObraForReport,
   type ObraRecord,
   type PdfGenerator,
   type ReportInput,
@@ -37,6 +38,7 @@ class FakeStore implements ConversationStore {
   treinamentos: Array<CreateTreinamentoInput & { id: number; entradaId: bigint }> = [];
   media: Array<{ entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }> = [];
   reportEntradas: EntradaForReport[] = [];
+  obrasForReport: ObraForReport[] = [];
 
   async findUserByPhone(phoneDigits: string): Promise<UserRecord | null> {
     return this.users.get(phoneDigits) ?? null;
@@ -109,6 +111,18 @@ class FakeStore implements ConversationStore {
     dateEnd: Date;
   }): Promise<EntradaForReport[]> {
     return this.reportEntradas;
+  }
+
+  async findEntradasForObraDay(_input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]> {
+    return this.reportEntradas;
+  }
+
+  async findObraById(obraId: number): Promise<ObraForReport | null> {
+    return this.obrasForReport.find((obra) => obra.id === obraId) ?? null;
+  }
+
+  async findObrasForAutoReport(): Promise<ObraForReport[]> {
+    return this.obrasForReport.filter((obra) => obra.status === "ACTIVE" && obra.whatsappAutoReportEnabled);
   }
 }
 
@@ -471,7 +485,7 @@ describe("ConversationService", () => {
       selectedObraNome: "Obra Residencial Aurora"
     });
     expect(messaging.messages).toHaveLength(1);
-    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
   });
 
   it("routes a main-menu selection right after the obra is auto-selected", async () => {
@@ -638,7 +652,7 @@ describe("ConversationService", () => {
       description: ""
     });
     expect(store.states.has(CHAT_ID)).toBe(false);
-    expect(messaging.messages.at(-1)?.text).toContain("Treinamento salvo");
+    expect(messaging.messages.at(-1)?.text).toContain("Treinamento registrado");
   });
 
   it("asks users with multiple companies to choose one before the Treinamento details", async () => {
@@ -678,7 +692,7 @@ describe("ConversationService", () => {
 
     expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_TRAINING_DATES");
     expect(store.treinamentos).toHaveLength(0);
-    expect(messaging.messages.at(-1)?.text).toContain("Data/hora invalida");
+    expect(messaging.messages.at(-1)?.text).toContain("Não entendi essa data");
   });
 
   it("re-shows the main menu after an invalid category", async () => {
@@ -688,8 +702,7 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("8"));
 
     expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
+    expect(messaging.messages.at(-1)?.text).toContain("Não entendi");
   });
 
   it("re-shows the include-only action menu after an invalid Inspecao action", async () => {
@@ -703,8 +716,7 @@ describe("ConversationService", () => {
       step: "ACTION_MENU",
       selectedTipo: "Inspecao de servico"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("1) Incluir");
+    expect(messaging.messages.at(-1)?.text).toContain("Não entendi");
     expect(messaging.messages.at(-1)?.text).not.toContain("Consulta");
   });
 
@@ -719,9 +731,7 @@ describe("ConversationService", () => {
       step: "ACTION_MENU",
       selectedTipo: "Abrir nao conformidade"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("1) Consulta");
-    expect(messaging.messages.at(-1)?.text).toContain("2) Incluir");
+    expect(messaging.messages.at(-1)?.text).toContain("Não entendi");
   });
 
   it("asks service type and procedure number before photo, then saves the description", async () => {
@@ -737,7 +747,7 @@ describe("ConversationService", () => {
       selectedEmpresaId: 10n,
       selectedObraId: 1
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Escolha o tipo de serviço");
+    expect(messaging.messages.at(-1)?.text).toContain("Qual o tipo de serviço?");
 
     await service.handleWebhook(textWebhook("2"));
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -759,7 +769,7 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("Parede norte concretada"));
 
     expect(storage.uploads).toHaveLength(1);
-    expect(storage.uploads[0].path).toContain("entradas/10/7/");
+    expect(storage.uploads[0].path).toContain("entradas/10/obras/1/");
     expect(store.entradas).toMatchObject([
       {
         userId: 7,
@@ -772,8 +782,60 @@ describe("ConversationService", () => {
       }
     ]);
     expect(store.media[0].mediaUrl).toBe(storage.uploads[0].path);
-    expect(store.states.has(CHAT_ID)).toBe(false);
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_POST_SAVE_CHOICE",
+      selectedObraId: 1
+    });
     expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+    expect(messaging.messages.at(-1)?.text).toContain("Incluir outro registro");
+  });
+
+  it("lets the user add another entry of the same tipo right after saving, without losing the obra", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("PROC-45/2026"));
+    await service.handleWebhook(photoWebhook());
+    await service.handleWebhook(textWebhook("Parede norte concretada"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_POST_SAVE_CHOICE",
+      selectedTipo: "Inspecao de servico",
+      selectedObraId: 1
+    });
+
+    await service.handleWebhook(textWebhook("1"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_SERVICE_TYPE",
+      selectedTipo: "Inspecao de servico",
+      selectedEmpresaId: 10n,
+      selectedObraId: 1,
+      selectedNumeroProcedimento: null
+    });
+
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("PROC-46/2026"));
+    await service.handleWebhook(photoWebhook());
+    await service.handleWebhook(textWebhook("Parede sul concretada"));
+
+    expect(storage.uploads).toHaveLength(2);
+    expect(store.entradas).toMatchObject([
+      { numeroProcedimento: "PROC-45/2026", description: "Parede norte concretada" },
+      { numeroProcedimento: "PROC-46/2026", description: "Parede sul concretada" }
+    ]);
+    expect(store.states.get(CHAT_ID)).toMatchObject({ step: "AWAITING_POST_SAVE_CHOICE" });
+
+    await service.handleWebhook(textWebhook("2"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "MAIN_MENU",
+      selectedObraId: 1,
+      selectedTipo: null
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
   });
 
   it("asks which obra to work on before showing the main menu when there are multiple", async () => {
@@ -793,7 +855,7 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
     expect(messaging.messages.at(-1)?.text).toContain("1) Obra Residencial Aurora");
     expect(messaging.messages.at(-1)?.text).toContain("2) Obra Boulevard");
-    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer acessar?");
+    expect(messaging.messages.at(-1)?.text).not.toContain("O que voce quer fazer agora?");
 
     await service.handleWebhook(textWebhook("2"));
 
@@ -803,8 +865,8 @@ describe("ConversationService", () => {
       selectedObraNome: "Obra Boulevard",
       flowData: expect.objectContaining({ selectedObraId: 4, selectedObraNome: "Obra Boulevard" })
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Boulevard");
-    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra Obra Boulevard");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
   });
 
   it("auto-selects the only active obra without asking", async () => {
@@ -817,8 +879,8 @@ describe("ConversationService", () => {
       selectedObraId: 1,
       selectedObraNome: "Obra Residencial Aurora"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Residencial Aurora");
-    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer acessar?");
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra Obra Residencial Aurora");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
   });
 
   it("re-prompts the obra menu after an invalid obra selection", async () => {
@@ -835,8 +897,7 @@ describe("ConversationService", () => {
       step: "SELECT_EMPRESA",
       stepKey: "SELECT_OBRA"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
+    expect(messaging.messages.at(-1)?.text).toContain("Não achei essa obra");
   });
 
   it("blocks the entire flow when there are no active obras", async () => {
@@ -846,7 +907,7 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("oi"));
 
     expect(store.states.has(CHAT_ID)).toBe(false);
-    expect(messaging.messages.at(-1)?.text).toContain("Nenhuma obra ativa cadastrada");
+    expect(messaging.messages.at(-1)?.text).toContain("Nenhuma obra ativa encontrada");
   });
 
   it("links the entry to the selected obra across the full inspection flow", async () => {
@@ -877,7 +938,10 @@ describe("ConversationService", () => {
         description: "Concretagem da laje 14"
       }
     ]);
-    expect(store.states.has(CHAT_ID)).toBe(false);
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_POST_SAVE_CHOICE",
+      selectedObraId: 4
+    });
   });
 
   it("lets the user switch obra mid-conversation with the 'trocar obra' command", async () => {
@@ -905,7 +969,7 @@ describe("ConversationService", () => {
       selectedObraId: 1,
       selectedObraNome: "Obra Residencial Aurora"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra: Obra Residencial Aurora");
+    expect(messaging.messages.at(-1)?.text).toContain("Voce esta na obra Obra Residencial Aurora");
   });
 
   it("prefixes every bot message with the current obra header", async () => {
@@ -981,14 +1045,14 @@ describe("ConversationService", () => {
       step: "AWAITING_DESCRIPTION",
       stepKey: "AWAITING_MATERIAL_QUANTITY"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("quantidade está correta");
+    expect(messaging.messages.at(-1)?.text).toContain("quantidade recebida está correta");
 
     await service.handleWebhook(textWebhook("talvez"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       stepKey: "AWAITING_MATERIAL_QUANTITY"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
+    expect(messaging.messages.at(-1)?.text).toContain("Digite 1 pra Sim ou 2 pra Não");
 
     await service.handleWebhook(textWebhook("1"));
 
@@ -998,7 +1062,7 @@ describe("ConversationService", () => {
         materialQuantidadeCorreta: "Sim"
       })
     });
-    expect(messaging.messages.at(-1)?.text).toContain("qualidade está correta");
+    expect(messaging.messages.at(-1)?.text).toContain("qualidade do material está boa");
 
     await service.handleWebhook(textWebhook("não"));
 
@@ -1006,7 +1070,7 @@ describe("ConversationService", () => {
       description: "Quantidade correta: Sim\nQualidade correta: Não"
     });
     expect(store.states.has(CHAT_ID)).toBe(false);
-    expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+    expect(messaging.messages.at(-1)?.text).toContain("Recebimento de material registrado");
   });
 
   it("rejects non-image files for both Recebimento de material photos", async () => {
@@ -1023,7 +1087,7 @@ describe("ConversationService", () => {
       stepKey: "AWAITING_MATERIAL_NOTA_PHOTO"
     });
     expect(store.entradas).toHaveLength(0);
-    expect(messaging.messages.at(-1)?.text).toContain("O arquivo precisa ser uma imagem");
+    expect(messaging.messages.at(-1)?.text).toContain("Isso nao e uma foto");
 
     await service.handleWebhook(photoWebhook("nota-2", "nota-2.jpg"));
     await service.handleWebhook(fileWebhook());
@@ -1032,7 +1096,7 @@ describe("ConversationService", () => {
       stepKey: "AWAITING_MATERIAL_PHOTO"
     });
     expect(store.media).toHaveLength(1);
-    expect(messaging.messages.at(-1)?.text).toContain("O arquivo precisa ser uma imagem");
+    expect(messaging.messages.at(-1)?.text).toContain("Isso nao e uma foto");
   });
 
   it("re-shows the service type menu after an invalid service option", async () => {
@@ -1049,8 +1113,7 @@ describe("ConversationService", () => {
       selectedTipo: "Inspecao de servico",
       selectedEmpresaId: 10n
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Opcao invalida");
-    expect(messaging.messages.at(-1)?.text).toContain("7) Outros");
+    expect(messaging.messages.at(-1)?.text).toContain("Não entendi. Digite um numero de 1 a 7.");
   });
 
   it("re-prompts when the procedure number is blank", async () => {
@@ -1091,7 +1154,7 @@ describe("ConversationService", () => {
       selectedTipoServico: "Concretagem",
       selectedNumeroProcedimento: "99-A"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Nao consegui processar a foto");
+    expect(messaging.messages.at(-1)?.text).toContain("Deu um problema pra salvar a foto");
   });
 
   it("asks users with multiple companies to choose one", async () => {
@@ -1115,7 +1178,7 @@ describe("ConversationService", () => {
       step: "AWAITING_SERVICE_TYPE",
       selectedEmpresaId: 20n
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Escolha o tipo de serviço");
+    expect(messaging.messages.at(-1)?.text).toContain("Qual o tipo de serviço?");
   });
 
   it("resets the flow from any step while keeping the active obra", async () => {
@@ -1182,7 +1245,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("32/13/2026"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
-      expect(messaging.messages.at(-1)?.text).toContain("Data invalida");
+      expect(messaging.messages.at(-1)?.text).toContain("Não entendi essa data");
       expect(pdfGenerator.calls).toHaveLength(0);
     });
 
@@ -1195,7 +1258,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("31/04/2026"));
 
       expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
-      expect(messaging.messages.at(-1)?.text).toContain("Data invalida");
+      expect(messaging.messages.at(-1)?.text).toContain("Não entendi essa data");
     });
 
     it("sends text only when no records found and resets to main menu", async () => {
@@ -1266,7 +1329,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("22/06/2026"));
 
       const allTexts = messaging.messages.map((m) => m.text);
-      const generandoIdx = allTexts.findIndex((t) => t.includes("Gerando relatorio"));
+      const generandoIdx = allTexts.findIndex((t) => t.includes("Gerando o relatorio"));
       expect(generandoIdx).toBeGreaterThanOrEqual(0);
     });
 
@@ -1305,7 +1368,7 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("7"));
 
       expect(store.states.has(CHAT_ID)).toBe(false);
-      expect(messaging.messages.at(-1)?.text).toContain("Nenhuma empresa vinculada");
+      expect(messaging.messages.at(-1)?.text).toContain("nao tem empresa vinculada");
     });
   });
 

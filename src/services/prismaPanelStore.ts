@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
+  DuplicatePanelUserEmailError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
   ProjectInUseError,
@@ -9,6 +10,10 @@ import {
   type EntryRecord,
   type MediaRecord,
   type PanelStore,
+  type PanelUserListInput,
+  type PanelUserListItem,
+  type PanelUserListResult,
+  type PanelUserRecord,
   type PersonRef,
   type ProjectInput,
   type ProjectListInput,
@@ -20,6 +25,14 @@ import {
   type StandardListResult,
   type StandardRecord
 } from "./panelService";
+
+const PANEL_USER_SELECT = {
+  id: true,
+  email: true,
+  name: true,
+  role: true,
+  active: true
+} as const;
 
 const STANDARD_SELECT = {
   id: true,
@@ -72,7 +85,7 @@ export class PrismaPanelStore implements PanelStore {
         },
         _count: { select: { media: true } }
       },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "desc" }
     });
 
     return entries.map((entry) => ({
@@ -317,7 +330,9 @@ export class PrismaPanelStore implements PanelStore {
           code: input.code,
           name: input.name,
           status: input.active ? "ACTIVE" : "INACTIVE",
-          attributes: input.context ? { context: input.context } : undefined
+          attributes: input.context ? { context: input.context } : undefined,
+          whatsappGroupId: input.whatsappGroupId,
+          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled
         }
       });
       return toProjectListItem(project);
@@ -353,7 +368,9 @@ export class PrismaPanelStore implements PanelStore {
           code: input.code,
           name: input.name,
           status: input.active ? "ACTIVE" : "INACTIVE",
-          attributes
+          attributes,
+          whatsappGroupId: input.whatsappGroupId,
+          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled
         }
       });
       return toProjectListItem(project);
@@ -386,6 +403,97 @@ export class PrismaPanelStore implements PanelStore {
       }
       throw error;
     }
+  }
+
+  async listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult> {
+    const where: Prisma.PanelUserWhereInput = input.search
+      ? {
+          OR: [
+            { name: { contains: input.search, mode: "insensitive" } },
+            { email: { contains: input.search, mode: "insensitive" } }
+          ]
+        }
+      : {};
+
+    const [data, totalCount] = await Promise.all([
+      this.prisma.panelUser.findMany({
+        where,
+        select: PANEL_USER_SELECT,
+        orderBy: { name: "asc" },
+        skip: input.page * input.size,
+        take: input.size
+      }),
+      this.prisma.panelUser.count({ where })
+    ]);
+
+    return { data, totalCount };
+  }
+
+  async findPanelUserById(id: number): Promise<PanelUserListItem | null> {
+    return this.prisma.panelUser.findUnique({ where: { id }, select: PANEL_USER_SELECT });
+  }
+
+  async findPanelUserByEmail(email: string): Promise<PanelUserRecord | null> {
+    return this.prisma.panelUser.findUnique({ where: { email } });
+  }
+
+  async createPanelUser(input: {
+    email: string;
+    name: string;
+    role: "ADMIN" | "MANAGER";
+    active: boolean;
+    passwordHash: string;
+  }): Promise<PanelUserListItem> {
+    try {
+      return await this.prisma.panelUser.create({
+        data: input,
+        select: PANEL_USER_SELECT
+      });
+    } catch (error) {
+      if (isPrismaError(error, "P2002")) {
+        throw new DuplicatePanelUserEmailError(input.email);
+      }
+      throw error;
+    }
+  }
+
+  async updatePanelUser(
+    id: number,
+    input: { email: string; name: string; role: "ADMIN" | "MANAGER"; active: boolean; passwordHash?: string }
+  ): Promise<PanelUserListItem | null> {
+    try {
+      return await this.prisma.panelUser.update({
+        where: { id },
+        data: input,
+        select: PANEL_USER_SELECT
+      });
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return null;
+      }
+      if (isPrismaError(error, "P2002")) {
+        throw new DuplicatePanelUserEmailError(input.email);
+      }
+      throw error;
+    }
+  }
+
+  async deletePanelUser(id: number): Promise<boolean> {
+    try {
+      await this.prisma.panelUser.delete({ where: { id } });
+      return true;
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async countActivePanelUsers(excludingId?: number): Promise<number> {
+    return this.prisma.panelUser.count({
+      where: { active: true, id: excludingId ? { not: excludingId } : undefined }
+    });
   }
 
   /** Empresa padrão do painel (cliente único na v1): a primeira cadastrada. */
@@ -431,6 +539,8 @@ function toProjectListItem(project: {
   name: string;
   status: string;
   attributes: unknown;
+  whatsappGroupId: string | null;
+  whatsappAutoReportEnabled: boolean;
 }): ProjectListItem {
   const attributes = project.attributes;
   const context =
@@ -443,7 +553,9 @@ function toProjectListItem(project: {
     code: project.code,
     name: project.name,
     context: typeof context === "string" ? context : null,
-    active: project.status === "ACTIVE"
+    active: project.status === "ACTIVE",
+    whatsappGroupId: project.whatsappGroupId,
+    whatsappAutoReportEnabled: project.whatsappAutoReportEnabled
   };
 }
 

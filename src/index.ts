@@ -1,20 +1,22 @@
 import { createApp } from "./app";
 import { createPanelRouter } from "./api/panelRouter";
 import { loadConfig } from "./config/env";
-import { createConversationService, createPanelService } from "./container";
+import { createConversationService, createPanelService, createDailyReportJobDeps } from "./container";
 import { prisma } from "./lib/prisma";
+import { scheduleDailyReportJob } from "./jobs/dailyReportJob";
 
 const config = loadConfig();
 
+scheduleDailyReportJob(config, createDailyReportJobDeps(config));
+
 let panelRouter;
-if (config.panelApiToken) {
+if (config.panelJwtSecret) {
   panelRouter = createPanelRouter(createPanelService(config), {
-    token: config.panelApiToken,
-    corsOrigins: config.panelCorsOrigins,
-    user: { name: config.panelUserName, role: config.panelUserRole }
+    jwtSecret: config.panelJwtSecret,
+    corsOrigins: config.panelCorsOrigins
   });
 } else {
-  console.warn("PANEL_API_TOKEN not set — manager panel API (/api/v1) is disabled.");
+  console.warn("PANEL_JWT_SECRET not set — manager panel API (/api/v1) is disabled.");
 }
 
 const app = createApp(createConversationService(config), config.webhookSecret, { panelRouter });

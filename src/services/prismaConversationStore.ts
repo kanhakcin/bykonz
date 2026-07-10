@@ -542,6 +542,7 @@ function mapState(state: {
   selectedTrainingEndsAt?: Date | null;
   selectedTrainingPhotoCount?: number | null;
   pendingEntryId: bigint | null;
+  updatedAt?: Date | null;
 }): ConversationStateRecord {
   const flowData = normalizeFlowData(state.flowData);
 
@@ -567,7 +568,8 @@ function mapState(state: {
     selectedTreinamentoFim: state.selectedTrainingEndsAt ?? dateFromFlowData(flowData.selectedTreinamentoFim),
     selectedTrainingPhotoCount:
       state.selectedTrainingPhotoCount ?? numberFromFlowData(flowData.selectedTrainingPhotoCount),
-    pendingEntradaId: state.pendingEntryId ?? bigintFromFlowData(flowData.pendingEntradaId)
+    pendingEntradaId: state.pendingEntryId ?? bigintFromFlowData(flowData.pendingEntradaId),
+    updatedAt: state.updatedAt ?? null
   };
 }
 

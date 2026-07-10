@@ -9,10 +9,13 @@ export const ROUTE_ICONS: Record<string, LucideIcon> = {
 };
 
 /**
- * Lista de rotas principais da aplicação.
- * Esta lista é derivada do FileRoutesByFullPath gerado pelo TanStack Router.
+ * Rotas principais da sidebar — UMA entrada por módulo (primeiro segmento).
+ * Cada módulo tem seu hub `index.tsx`; as sub-rotas (ex.: /cadastros/obras)
+ * aparecem dentro do hub, não na sidebar.
  *
- * NOTA: Mantenha sincronizado com as rotas disponíveis no projeto.
+ * NOTA: manter à mão. NÃO rodar `pnpm run routes` (extract-routes.config.ts):
+ * o gerador expande módulos com várias sub-rotas em uma entrada por sub-rota,
+ * duplicando o item (ex.: 5x "cadastros"). Ver [[no-git-stash-vite-running]].
  */
 export const MAIN_ROUTES = ['/painel/', '/cadastros/', '/relatorios/'] as const;
 

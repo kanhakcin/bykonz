@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router';
 import { Trash2 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -21,6 +21,7 @@ import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Form } from '@/components/ui/form';
 import { Spinner } from '@/components/ui/spinner';
 import { useProject, useProjectsApi } from '@/hooks/use-projects-api';
+import { ProjectCoverField } from '../@components/project-cover-field';
 import { ProjectForm } from '../@components/project-form';
 import { useProjectForm } from '../@hooks/use-project-form';
 import type { Project, ProjectFormData } from '../@interface/project.interface';
@@ -65,6 +66,7 @@ function ProjectAddFormContent({ initialData }: { initialData?: Project }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { deleteProject } = useProjectsApi();
+  const [coverFile, setCoverFile] = useState<File | null>(null);
 
   const formData = useMemo<ProjectFormData | undefined>(() => {
     if (!initialData) return undefined;
@@ -79,7 +81,7 @@ function ProjectAddFormContent({ initialData }: { initialData?: Project }) {
     };
   }, [initialData]);
 
-  const { form, onSubmit, isPending } = useProjectForm(formData);
+  const { form, onSubmit, isPending } = useProjectForm(formData, coverFile);
 
   const handleDelete = async () => {
     if (!initialData?.id) return;
@@ -97,8 +99,9 @@ function ProjectAddFormContent({ initialData }: { initialData?: Project }) {
       <CardHeader />
       <Form {...form}>
         <form onSubmit={onSubmit}>
-          <CardContent>
+          <CardContent className="flex flex-col gap-6">
             <ProjectForm />
+            <ProjectCoverField currentCover={initialData?.coverImage} onFileChange={setCoverFile} />
           </CardContent>
           <CardFooter>
             {initialData && (

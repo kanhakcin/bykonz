@@ -18,6 +18,8 @@ export interface Project {
   name: string;
   context: string | null;
   active: boolean;
+  /** URL relativa da capa (`/projects/:id/cover`) quando há imagem; senão null. */
+  coverImage: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
 }

@@ -58,6 +58,8 @@ export interface ConversationStateRecord {
   selectedTreinamentoFim?: Date | null;
   selectedTrainingPhotoCount?: number | null;
   pendingEntradaId?: bigint | null;
+  /** Ultima atualizacao do estado, usada para expirar a sessao por inatividade. */
+  updatedAt?: Date | null;
 }
 
 export interface SaveConversationStateInput extends ConversationStateRecord {}

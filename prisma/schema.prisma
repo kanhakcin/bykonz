@@ -206,13 +206,15 @@ model Asset {
   qrcodeToken   String? @unique @map("qrcode_token")
   active        Boolean @default(true)
 
-  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  sector    Sector    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  assetType AssetType @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
-  parent    Asset?    @relation("AssetTree", fields: [parentAssetId], references: [id], onDelete: SetNull)
-  children  Asset[]   @relation("AssetTree")
-  entries   Entry[]
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sector      Sector            @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  assetType   AssetType         @relation(fields: [assetTypeId], references: [id], onDelete: Restrict)
+  parent      Asset?            @relation("AssetTree", fields: [parentAssetId], references: [id], onDelete: SetNull)
+  children    Asset[]           @relation("AssetTree")
+  entries     Entry[]
+  inspections AssetInspection[]
 
+  @@unique([sectorId, code])
   @@index([projectId])
   @@index([parentAssetId])
   @@map("assets")
@@ -254,9 +256,10 @@ model Person {
   sector       Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
   company      Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
   project      Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  aliases      PersonAlias[]
-  competencies Competency[]
-  inspections  MachineInspection[] @relation("Inspector")
+  aliases          PersonAlias[]
+  competencies     Competency[]
+  inspections      MachineInspection[] @relation("Inspector")
+  assetInspections AssetInspection[]   @relation("AssetInspector")
 
   @@unique([sectorId, registrationCode])
   @@index([projectId])
@@ -320,9 +323,10 @@ model ChecklistTemplate {
   name         String
   validityDays Int?   @map("validity_days")
 
-  sector      Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  items       ChecklistItem[]
-  inspections MachineInspection[]
+  sector           Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  items            ChecklistItem[]
+  inspections      MachineInspection[]
+  assetInspections AssetInspection[]
 
   @@map("checklist_templates")
 }
@@ -334,8 +338,9 @@ model ChecklistItem {
   description String
   required    Boolean @default(true)
 
-  template          ChecklistTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  inspectionResults MachineInspectionItem[]
+  template               ChecklistTemplate       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  inspectionResults      MachineInspectionItem[]
+  assetInspectionResults AssetInspectionItem[]
 
   @@unique([templateId, position])
   @@map("checklist_items")
@@ -372,6 +377,39 @@ model MachineInspectionItem {
 
   @@unique([inspectionId, checklistItemId])
   @@map("machine_inspection_items")
+}
+
+model AssetInspection {
+  id                Int              @id @default(autoincrement())
+  assetId           Int              @map("asset_id")
+  templateId        Int              @map("template_id")
+  inspectedAt       DateTime         @map("inspected_at") @db.Timestamptz(6)
+  inspectorPersonId Int?             @map("inspector_person_id")
+  result            InspectionResult
+  validUntil        DateTime?        @map("valid_until") @db.Timestamptz(6)
+  notes             String?
+
+  asset     Asset                 @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  template  ChecklistTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  inspector Person?               @relation("AssetInspector", fields: [inspectorPersonId], references: [id], onDelete: SetNull)
+  items     AssetInspectionItem[]
+
+  @@index([assetId, inspectedAt])
+  @@map("asset_inspections")
+}
+
+model AssetInspectionItem {
+  id              Int        @id @default(autoincrement())
+  inspectionId    Int        @map("inspection_id")
+  checklistItemId Int        @map("checklist_item_id")
+  result          ItemResult
+  note            String?
+
+  inspection    AssetInspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  checklistItem ChecklistItem   @relation(fields: [checklistItemId], references: [id], onDelete: Restrict)
+
+  @@unique([inspectionId, checklistItemId])
+  @@map("asset_inspection_items")
 }
 
 // ---------------------------------------------------------------------------

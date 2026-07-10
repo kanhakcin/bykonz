@@ -17,11 +17,15 @@ import { Route as PrivateRelatoriosIndexRouteImport } from './routes/_private/re
 import { Route as PrivatePainelIndexRouteImport } from './routes/_private/painel/index';
 import { Route as PrivateCadastrosIndexRouteImport } from './routes/_private/cadastros/index';
 import { Route as PrivateCadastrosUsuariosIndexRouteImport } from './routes/_private/cadastros/usuarios/index';
+import { Route as PrivateCadastrosPessoasIndexRouteImport } from './routes/_private/cadastros/pessoas/index';
 import { Route as PrivateCadastrosObrasIndexRouteImport } from './routes/_private/cadastros/obras/index';
 import { Route as PrivateCadastrosNormasIndexRouteImport } from './routes/_private/cadastros/normas/index';
+import { Route as PrivateCadastrosAtivosIndexRouteImport } from './routes/_private/cadastros/ativos/index';
 import { Route as PrivateCadastrosUsuariosAddIndexRouteImport } from './routes/_private/cadastros/usuarios/add/index';
+import { Route as PrivateCadastrosPessoasAddIndexRouteImport } from './routes/_private/cadastros/pessoas/add/index';
 import { Route as PrivateCadastrosObrasAddIndexRouteImport } from './routes/_private/cadastros/obras/add/index';
 import { Route as PrivateCadastrosNormasAddIndexRouteImport } from './routes/_private/cadastros/normas/add/index';
+import { Route as PrivateCadastrosAtivosAddIndexRouteImport } from './routes/_private/cadastros/ativos/add/index';
 
 const PublicRoute = PublicRouteImport.update({
   id: '/_public',
@@ -62,6 +66,12 @@ const PrivateCadastrosUsuariosIndexRoute =
     path: '/cadastros/usuarios/',
     getParentRoute: () => PrivateRoute,
   } as any);
+const PrivateCadastrosPessoasIndexRoute =
+  PrivateCadastrosPessoasIndexRouteImport.update({
+    id: '/cadastros/pessoas/',
+    path: '/cadastros/pessoas/',
+    getParentRoute: () => PrivateRoute,
+  } as any);
 const PrivateCadastrosObrasIndexRoute =
   PrivateCadastrosObrasIndexRouteImport.update({
     id: '/cadastros/obras/',
@@ -74,10 +84,22 @@ const PrivateCadastrosNormasIndexRoute =
     path: '/cadastros/normas/',
     getParentRoute: () => PrivateRoute,
   } as any);
+const PrivateCadastrosAtivosIndexRoute =
+  PrivateCadastrosAtivosIndexRouteImport.update({
+    id: '/cadastros/ativos/',
+    path: '/cadastros/ativos/',
+    getParentRoute: () => PrivateRoute,
+  } as any);
 const PrivateCadastrosUsuariosAddIndexRoute =
   PrivateCadastrosUsuariosAddIndexRouteImport.update({
     id: '/cadastros/usuarios/add/',
     path: '/cadastros/usuarios/add/',
+    getParentRoute: () => PrivateRoute,
+  } as any);
+const PrivateCadastrosPessoasAddIndexRoute =
+  PrivateCadastrosPessoasAddIndexRouteImport.update({
+    id: '/cadastros/pessoas/add/',
+    path: '/cadastros/pessoas/add/',
     getParentRoute: () => PrivateRoute,
   } as any);
 const PrivateCadastrosObrasAddIndexRoute =
@@ -92,6 +114,12 @@ const PrivateCadastrosNormasAddIndexRoute =
     path: '/cadastros/normas/add/',
     getParentRoute: () => PrivateRoute,
   } as any);
+const PrivateCadastrosAtivosAddIndexRoute =
+  PrivateCadastrosAtivosAddIndexRouteImport.update({
+    id: '/cadastros/ativos/add/',
+    path: '/cadastros/ativos/add/',
+    getParentRoute: () => PrivateRoute,
+  } as any);
 
 export interface FileRoutesByFullPath {
   '/': typeof PrivateIndexRoute;
@@ -99,11 +127,15 @@ export interface FileRoutesByFullPath {
   '/painel/': typeof PrivatePainelIndexRoute;
   '/relatorios/': typeof PrivateRelatoriosIndexRoute;
   '/auth/': typeof PublicAuthIndexRoute;
+  '/cadastros/ativos/': typeof PrivateCadastrosAtivosIndexRoute;
   '/cadastros/normas/': typeof PrivateCadastrosNormasIndexRoute;
   '/cadastros/obras/': typeof PrivateCadastrosObrasIndexRoute;
+  '/cadastros/pessoas/': typeof PrivateCadastrosPessoasIndexRoute;
   '/cadastros/usuarios/': typeof PrivateCadastrosUsuariosIndexRoute;
+  '/cadastros/ativos/add/': typeof PrivateCadastrosAtivosAddIndexRoute;
   '/cadastros/normas/add/': typeof PrivateCadastrosNormasAddIndexRoute;
   '/cadastros/obras/add/': typeof PrivateCadastrosObrasAddIndexRoute;
+  '/cadastros/pessoas/add/': typeof PrivateCadastrosPessoasAddIndexRoute;
   '/cadastros/usuarios/add/': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRoutesByTo {
@@ -112,11 +144,15 @@ export interface FileRoutesByTo {
   '/painel': typeof PrivatePainelIndexRoute;
   '/relatorios': typeof PrivateRelatoriosIndexRoute;
   '/auth': typeof PublicAuthIndexRoute;
+  '/cadastros/ativos': typeof PrivateCadastrosAtivosIndexRoute;
   '/cadastros/normas': typeof PrivateCadastrosNormasIndexRoute;
   '/cadastros/obras': typeof PrivateCadastrosObrasIndexRoute;
+  '/cadastros/pessoas': typeof PrivateCadastrosPessoasIndexRoute;
   '/cadastros/usuarios': typeof PrivateCadastrosUsuariosIndexRoute;
+  '/cadastros/ativos/add': typeof PrivateCadastrosAtivosAddIndexRoute;
   '/cadastros/normas/add': typeof PrivateCadastrosNormasAddIndexRoute;
   '/cadastros/obras/add': typeof PrivateCadastrosObrasAddIndexRoute;
+  '/cadastros/pessoas/add': typeof PrivateCadastrosPessoasAddIndexRoute;
   '/cadastros/usuarios/add': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRoutesById {
@@ -128,11 +164,15 @@ export interface FileRoutesById {
   '/_private/painel/': typeof PrivatePainelIndexRoute;
   '/_private/relatorios/': typeof PrivateRelatoriosIndexRoute;
   '/_public/auth/': typeof PublicAuthIndexRoute;
+  '/_private/cadastros/ativos/': typeof PrivateCadastrosAtivosIndexRoute;
   '/_private/cadastros/normas/': typeof PrivateCadastrosNormasIndexRoute;
   '/_private/cadastros/obras/': typeof PrivateCadastrosObrasIndexRoute;
+  '/_private/cadastros/pessoas/': typeof PrivateCadastrosPessoasIndexRoute;
   '/_private/cadastros/usuarios/': typeof PrivateCadastrosUsuariosIndexRoute;
+  '/_private/cadastros/ativos/add/': typeof PrivateCadastrosAtivosAddIndexRoute;
   '/_private/cadastros/normas/add/': typeof PrivateCadastrosNormasAddIndexRoute;
   '/_private/cadastros/obras/add/': typeof PrivateCadastrosObrasAddIndexRoute;
+  '/_private/cadastros/pessoas/add/': typeof PrivateCadastrosPessoasAddIndexRoute;
   '/_private/cadastros/usuarios/add/': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRouteTypes {
@@ -143,11 +183,15 @@ export interface FileRouteTypes {
     | '/painel/'
     | '/relatorios/'
     | '/auth/'
+    | '/cadastros/ativos/'
     | '/cadastros/normas/'
     | '/cadastros/obras/'
+    | '/cadastros/pessoas/'
     | '/cadastros/usuarios/'
+    | '/cadastros/ativos/add/'
     | '/cadastros/normas/add/'
     | '/cadastros/obras/add/'
+    | '/cadastros/pessoas/add/'
     | '/cadastros/usuarios/add/';
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -156,11 +200,15 @@ export interface FileRouteTypes {
     | '/painel'
     | '/relatorios'
     | '/auth'
+    | '/cadastros/ativos'
     | '/cadastros/normas'
     | '/cadastros/obras'
+    | '/cadastros/pessoas'
     | '/cadastros/usuarios'
+    | '/cadastros/ativos/add'
     | '/cadastros/normas/add'
     | '/cadastros/obras/add'
+    | '/cadastros/pessoas/add'
     | '/cadastros/usuarios/add';
   id:
     | '__root__'
@@ -171,11 +219,15 @@ export interface FileRouteTypes {
     | '/_private/painel/'
     | '/_private/relatorios/'
     | '/_public/auth/'
+    | '/_private/cadastros/ativos/'
     | '/_private/cadastros/normas/'
     | '/_private/cadastros/obras/'
+    | '/_private/cadastros/pessoas/'
     | '/_private/cadastros/usuarios/'
+    | '/_private/cadastros/ativos/add/'
     | '/_private/cadastros/normas/add/'
     | '/_private/cadastros/obras/add/'
+    | '/_private/cadastros/pessoas/add/'
     | '/_private/cadastros/usuarios/add/';
   fileRoutesById: FileRoutesById;
 }
@@ -242,6 +294,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivateCadastrosUsuariosIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
+    '/_private/cadastros/pessoas/': {
+      id: '/_private/cadastros/pessoas/';
+      path: '/cadastros/pessoas';
+      fullPath: '/cadastros/pessoas/';
+      preLoaderRoute: typeof PrivateCadastrosPessoasIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
     '/_private/cadastros/obras/': {
       id: '/_private/cadastros/obras/';
       path: '/cadastros/obras';
@@ -256,11 +315,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivateCadastrosNormasIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
+    '/_private/cadastros/ativos/': {
+      id: '/_private/cadastros/ativos/';
+      path: '/cadastros/ativos';
+      fullPath: '/cadastros/ativos/';
+      preLoaderRoute: typeof PrivateCadastrosAtivosIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
     '/_private/cadastros/usuarios/add/': {
       id: '/_private/cadastros/usuarios/add/';
       path: '/cadastros/usuarios/add';
       fullPath: '/cadastros/usuarios/add/';
       preLoaderRoute: typeof PrivateCadastrosUsuariosAddIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
+    '/_private/cadastros/pessoas/add/': {
+      id: '/_private/cadastros/pessoas/add/';
+      path: '/cadastros/pessoas/add';
+      fullPath: '/cadastros/pessoas/add/';
+      preLoaderRoute: typeof PrivateCadastrosPessoasAddIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
     '/_private/cadastros/obras/add/': {
@@ -277,6 +350,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivateCadastrosNormasAddIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
+    '/_private/cadastros/ativos/add/': {
+      id: '/_private/cadastros/ativos/add/';
+      path: '/cadastros/ativos/add';
+      fullPath: '/cadastros/ativos/add/';
+      preLoaderRoute: typeof PrivateCadastrosAtivosAddIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
   }
 }
 
@@ -285,11 +365,15 @@ interface PrivateRouteChildren {
   PrivateCadastrosIndexRoute: typeof PrivateCadastrosIndexRoute;
   PrivatePainelIndexRoute: typeof PrivatePainelIndexRoute;
   PrivateRelatoriosIndexRoute: typeof PrivateRelatoriosIndexRoute;
+  PrivateCadastrosAtivosIndexRoute: typeof PrivateCadastrosAtivosIndexRoute;
   PrivateCadastrosNormasIndexRoute: typeof PrivateCadastrosNormasIndexRoute;
   PrivateCadastrosObrasIndexRoute: typeof PrivateCadastrosObrasIndexRoute;
+  PrivateCadastrosPessoasIndexRoute: typeof PrivateCadastrosPessoasIndexRoute;
   PrivateCadastrosUsuariosIndexRoute: typeof PrivateCadastrosUsuariosIndexRoute;
+  PrivateCadastrosAtivosAddIndexRoute: typeof PrivateCadastrosAtivosAddIndexRoute;
   PrivateCadastrosNormasAddIndexRoute: typeof PrivateCadastrosNormasAddIndexRoute;
   PrivateCadastrosObrasAddIndexRoute: typeof PrivateCadastrosObrasAddIndexRoute;
+  PrivateCadastrosPessoasAddIndexRoute: typeof PrivateCadastrosPessoasAddIndexRoute;
   PrivateCadastrosUsuariosAddIndexRoute: typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 
@@ -298,11 +382,15 @@ const PrivateRouteChildren: PrivateRouteChildren = {
   PrivateCadastrosIndexRoute: PrivateCadastrosIndexRoute,
   PrivatePainelIndexRoute: PrivatePainelIndexRoute,
   PrivateRelatoriosIndexRoute: PrivateRelatoriosIndexRoute,
+  PrivateCadastrosAtivosIndexRoute: PrivateCadastrosAtivosIndexRoute,
   PrivateCadastrosNormasIndexRoute: PrivateCadastrosNormasIndexRoute,
   PrivateCadastrosObrasIndexRoute: PrivateCadastrosObrasIndexRoute,
+  PrivateCadastrosPessoasIndexRoute: PrivateCadastrosPessoasIndexRoute,
   PrivateCadastrosUsuariosIndexRoute: PrivateCadastrosUsuariosIndexRoute,
+  PrivateCadastrosAtivosAddIndexRoute: PrivateCadastrosAtivosAddIndexRoute,
   PrivateCadastrosNormasAddIndexRoute: PrivateCadastrosNormasAddIndexRoute,
   PrivateCadastrosObrasAddIndexRoute: PrivateCadastrosObrasAddIndexRoute,
+  PrivateCadastrosPessoasAddIndexRoute: PrivateCadastrosPessoasAddIndexRoute,
   PrivateCadastrosUsuariosAddIndexRoute: PrivateCadastrosUsuariosAddIndexRoute,
 };
 

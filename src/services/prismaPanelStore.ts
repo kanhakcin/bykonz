@@ -1,11 +1,24 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
+  AssetInUseError,
+  DuplicateAssetCodeError,
   DuplicatePanelUserEmailError,
+  DuplicatePersonCodeError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
+  PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
   type AlertRecord,
+  type AssetInput,
+  type AssetListInput,
+  type AssetListResult,
+  type AssetRecord,
+  type AssetTypeRef,
+  type PersonInput,
+  type PersonListInput,
+  type PersonListResult,
+  type PersonRecord,
   type CodeRef,
   type EntryRecord,
   type MediaRecord,
@@ -41,6 +54,25 @@ const STANDARD_SELECT = {
   description: true,
   version: true,
   active: true
+} as const;
+
+const ASSET_SELECT = {
+  id: true,
+  code: true,
+  name: true,
+  assetTypeId: true,
+  projectId: true,
+  active: true,
+  assetType: { select: { name: true } }
+} as const;
+
+const PERSON_SELECT = {
+  id: true,
+  name: true,
+  registrationCode: true,
+  role: true,
+  status: true,
+  projectId: true
 } as const;
 
 export class PrismaPanelStore implements PanelStore {
@@ -289,6 +321,167 @@ export class PrismaPanelStore implements PanelStore {
     }
   }
 
+  async listAssets(input: AssetListInput): Promise<AssetListResult> {
+    const sectorId = await this.defaultSectorId();
+    const where: Prisma.AssetWhereInput = { sectorId };
+
+    if (input.search) {
+      where.OR = [
+        { code: { contains: input.search, mode: "insensitive" } },
+        { name: { contains: input.search, mode: "insensitive" } }
+      ];
+    }
+
+    const [data, totalCount] = await Promise.all([
+      this.prisma.asset.findMany({
+        where,
+        select: ASSET_SELECT,
+        orderBy: { code: "asc" },
+        skip: input.page * input.size,
+        take: input.size
+      }),
+      this.prisma.asset.count({ where })
+    ]);
+
+    return { data: data.map(toAssetRecord), totalCount };
+  }
+
+  async findAssetById(id: number): Promise<AssetRecord | null> {
+    const asset = await this.prisma.asset.findUnique({
+      where: { id },
+      select: ASSET_SELECT
+    });
+    return asset ? toAssetRecord(asset) : null;
+  }
+
+  async createAsset(input: AssetInput): Promise<AssetRecord> {
+    const sectorId = await this.defaultSectorId();
+    try {
+      const asset = await this.prisma.asset.create({
+        data: { sectorId, ...input },
+        select: ASSET_SELECT
+      });
+      return toAssetRecord(asset);
+    } catch (error) {
+      throw translateAssetError(error, input.code);
+    }
+  }
+
+  async updateAsset(id: number, input: AssetInput): Promise<AssetRecord | null> {
+    try {
+      const asset = await this.prisma.asset.update({
+        where: { id },
+        data: input,
+        select: ASSET_SELECT
+      });
+      return toAssetRecord(asset);
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return null;
+      }
+      throw translateAssetError(error, input.code);
+    }
+  }
+
+  async deleteAsset(id: number): Promise<boolean> {
+    try {
+      await this.prisma.asset.delete({ where: { id } });
+      return true;
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return false;
+      }
+      if (isPrismaError(error, "P2003")) {
+        throw new AssetInUseError(id);
+      }
+      throw error;
+    }
+  }
+
+  async listAssetTypes(): Promise<AssetTypeRef[]> {
+    const sectorId = await this.defaultSectorId();
+    return this.prisma.assetType.findMany({
+      where: { sectorId },
+      select: { id: true, code: true, name: true, level: true, parentTypeId: true },
+      orderBy: [{ level: "asc" }, { name: "asc" }]
+    });
+  }
+
+  async listPeople(input: PersonListInput): Promise<PersonListResult> {
+    const sectorId = await this.defaultSectorId();
+    const where: Prisma.PersonWhereInput = { sectorId };
+
+    if (input.search) {
+      where.OR = [
+        { name: { contains: input.search, mode: "insensitive" } },
+        { registrationCode: { contains: input.search, mode: "insensitive" } },
+        { role: { contains: input.search, mode: "insensitive" } }
+      ];
+    }
+
+    const [data, totalCount] = await Promise.all([
+      this.prisma.person.findMany({
+        where,
+        select: PERSON_SELECT,
+        orderBy: { name: "asc" },
+        skip: input.page * input.size,
+        take: input.size
+      }),
+      this.prisma.person.count({ where })
+    ]);
+
+    return { data, totalCount };
+  }
+
+  async findPersonById(id: number): Promise<PersonRecord | null> {
+    return this.prisma.person.findUnique({
+      where: { id },
+      select: PERSON_SELECT
+    });
+  }
+
+  async createPerson(input: PersonInput): Promise<PersonRecord> {
+    const [companyId, sectorId] = await Promise.all([this.defaultCompanyId(), this.defaultSectorId()]);
+    try {
+      return await this.prisma.person.create({
+        data: { sectorId, companyId, ...input },
+        select: PERSON_SELECT
+      });
+    } catch (error) {
+      throw translatePersonError(error, input.registrationCode);
+    }
+  }
+
+  async updatePerson(id: number, input: PersonInput): Promise<PersonRecord | null> {
+    try {
+      return await this.prisma.person.update({
+        where: { id },
+        data: input,
+        select: PERSON_SELECT
+      });
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return null;
+      }
+      throw translatePersonError(error, input.registrationCode);
+    }
+  }
+
+  async deletePerson(id: number): Promise<boolean> {
+    try {
+      await this.prisma.person.delete({ where: { id } });
+      return true;
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return false;
+      }
+      if (isPrismaError(error, "P2003")) {
+        throw new PersonInUseError(id);
+      }
+      throw error;
+    }
+  }
+
   async listProjects(input: ProjectListInput): Promise<ProjectListResult> {
     const where: Prisma.ProjectWhereInput = {};
 
@@ -403,6 +596,33 @@ export class PrismaPanelStore implements PanelStore {
       }
       throw error;
     }
+  }
+
+  async setProjectCoverKey(id: number, key: string): Promise<boolean> {
+    const existing = await this.prisma.project.findUnique({ where: { id }, select: { attributes: true } });
+    if (!existing) {
+      return false;
+    }
+
+    // Preserva as demais chaves de attributes (ex.: context); só grava a coverImage.
+    const attributes =
+      existing.attributes && typeof existing.attributes === "object" && !Array.isArray(existing.attributes)
+        ? { ...(existing.attributes as Prisma.JsonObject) }
+        : {};
+    attributes.coverImage = key;
+
+    await this.prisma.project.update({ where: { id }, data: { attributes } });
+    return true;
+  }
+
+  async findProjectCoverKey(id: number): Promise<string | null> {
+    const project = await this.prisma.project.findUnique({ where: { id }, select: { attributes: true } });
+    const attributes = project?.attributes;
+    if (!attributes || typeof attributes !== "object" || Array.isArray(attributes)) {
+      return null;
+    }
+    const key = (attributes as Record<string, unknown>).coverImage;
+    return typeof key === "string" && key !== "" ? key : null;
   }
 
   async listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult> {
@@ -542,11 +762,12 @@ function toProjectListItem(project: {
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
 }): ProjectListItem {
-  const attributes = project.attributes;
-  const context =
-    attributes && typeof attributes === "object" && !Array.isArray(attributes)
-      ? (attributes as Record<string, unknown>).context
-      : null;
+  const attributes =
+    project.attributes && typeof project.attributes === "object" && !Array.isArray(project.attributes)
+      ? (project.attributes as Record<string, unknown>)
+      : {};
+  const context = attributes.context;
+  const hasCover = typeof attributes.coverImage === "string" && attributes.coverImage !== "";
 
   return {
     id: project.id,
@@ -554,6 +775,8 @@ function toProjectListItem(project: {
     name: project.name,
     context: typeof context === "string" ? context : null,
     active: project.status === "ACTIVE",
+    // A key S3 fica no banco; a API expõe só a URL de download autenticado.
+    coverImage: hasCover ? `/projects/${project.id}/cover` : null,
     whatsappGroupId: project.whatsappGroupId,
     whatsappAutoReportEnabled: project.whatsappAutoReportEnabled
   };
@@ -568,4 +791,38 @@ function translateStandardError(error: unknown, code: string): unknown {
     return new DuplicateStandardCodeError(code);
   }
   return error;
+}
+
+function translateAssetError(error: unknown, code: string): unknown {
+  if (isPrismaError(error, "P2002")) {
+    return new DuplicateAssetCodeError(code);
+  }
+  return error;
+}
+
+function translatePersonError(error: unknown, code: string | null): unknown {
+  if (isPrismaError(error, "P2002")) {
+    return new DuplicatePersonCodeError(code ?? "");
+  }
+  return error;
+}
+
+function toAssetRecord(asset: {
+  id: number;
+  code: string;
+  name: string;
+  assetTypeId: number;
+  projectId: number;
+  active: boolean;
+  assetType: { name: string };
+}): AssetRecord {
+  return {
+    id: asset.id,
+    code: asset.code,
+    name: asset.name,
+    assetTypeId: asset.assetTypeId,
+    assetTypeName: asset.assetType.name,
+    projectId: asset.projectId,
+    active: asset.active
+  };
 }

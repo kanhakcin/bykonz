@@ -2,17 +2,24 @@ import cors from "cors";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { createPanelAuth, requirePanelRole, signPanelToken, type AuthenticatedRequest } from "./panelAuth";
 import {
+  AssetInUseError,
+  DuplicateAssetCodeError,
   DuplicatePanelUserEmailError,
+  DuplicatePersonCodeError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
   InvalidDateError,
   LastActivePanelUserError,
   PanelUserPasswordRequiredError,
+  PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
+  type AssetInput,
   type PanelService,
   type PanelUserInput,
   type PanelUserRole,
+  type PersonInput,
+  type PersonStatus,
   type ProjectInput,
   type StandardInput
 } from "../services/panelService";
@@ -326,6 +333,62 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  // Download autenticado da capa da obra (espelha GET /media/:id).
+  router.get("/projects/:id/cover", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const cover = await service.getProjectCover(id);
+      if (!cover) {
+        res.status(404).json({ error: "cover_not_found" });
+        return;
+      }
+
+      res.setHeader("Content-Type", cover.contentType);
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.send(cover.body);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Upload da capa como JSON base64 (evita dependência de multipart/multer).
+  // O campo é grande, então usa um parser com limite próprio, só nesta rota.
+  router.post(
+    "/projects/:id/cover",
+    express.json({ limit: "10mb" }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const id = parseId(req.params.id);
+        if (id === null) {
+          res.status(400).json({ error: "invalid_id" });
+          return;
+        }
+
+        const cover = parseCoverUpload(req.body);
+        if (!cover) {
+          res.status(400).json({ error: "invalid_payload" });
+          return;
+        }
+
+        const key = `panel/projects/${id}/cover-${Date.now()}.${cover.ext}`;
+        const updated = await service.uploadProjectCover(id, { key, body: cover.body, contentType: cover.contentType });
+        if (!updated) {
+          res.status(404).json({ error: "project_not_found" });
+          return;
+        }
+
+        res.json({ coverImage: `/projects/${id}/cover` });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
   router.post("/projects", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const input = parseProjectInput(req.body);
@@ -383,6 +446,216 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
       res.json({ ok: true });
     } catch (error) {
       handleProjectError(error, res, next);
+    }
+  });
+
+  // ---- Assets registry (CRUD) ----------------------------------------------
+
+  router.get("/asset-types", async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await service.listAssetTypes());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/assets", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listAssets({ search, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/assets/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const asset = await service.getAsset(id);
+      if (!asset) {
+        res.status(404).json({ error: "asset_not_found" });
+        return;
+      }
+
+      res.json(asset);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/assets", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parseAssetInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createAsset(input));
+    } catch (error) {
+      handleAssetError(error, res, next);
+    }
+  });
+
+  router.put("/assets/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parseAssetInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const asset = await service.updateAsset(id, input);
+      if (!asset) {
+        res.status(404).json({ error: "asset_not_found" });
+        return;
+      }
+
+      res.json(asset);
+    } catch (error) {
+      handleAssetError(error, res, next);
+    }
+  });
+
+  router.delete("/assets/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deleteAsset(id);
+      if (!found) {
+        res.status(404).json({ error: "asset_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handleAssetError(error, res, next);
+    }
+  });
+
+  // ---- People registry (CRUD) ----------------------------------------------
+
+  router.get("/people", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listPeople({ search, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/people/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const person = await service.getPerson(id);
+      if (!person) {
+        res.status(404).json({ error: "person_not_found" });
+        return;
+      }
+
+      res.json(person);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/people", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parsePersonInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createPerson(input));
+    } catch (error) {
+      handlePersonError(error, res, next);
+    }
+  });
+
+  router.put("/people/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parsePersonInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const person = await service.updatePerson(id, input);
+      if (!person) {
+        res.status(404).json({ error: "person_not_found" });
+        return;
+      }
+
+      res.json(person);
+    } catch (error) {
+      handlePersonError(error, res, next);
+    }
+  });
+
+  router.delete("/people/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deletePerson(id);
+      if (!found) {
+        res.status(404).json({ error: "person_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handlePersonError(error, res, next);
     }
   });
 
@@ -510,6 +783,30 @@ function handleStandardError(error: unknown, res: Response, next: NextFunction):
   next(error);
 }
 
+function handleAssetError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicateAssetCodeError) {
+    res.status(409).json({ error: "duplicate_code", code: "asset.duplicated" });
+    return;
+  }
+  if (error instanceof AssetInUseError) {
+    res.status(409).json({ error: "asset_in_use", code: "asset.inUse" });
+    return;
+  }
+  next(error);
+}
+
+function handlePersonError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicatePersonCodeError) {
+    res.status(409).json({ error: "duplicate_code", code: "person.duplicated" });
+    return;
+  }
+  if (error instanceof PersonInUseError) {
+    res.status(409).json({ error: "person_in_use", code: "person.inUse" });
+    return;
+  }
+  next(error);
+}
+
 function handleProjectError(error: unknown, res: Response, next: NextFunction): void {
   if (error instanceof DuplicateProjectCodeError) {
     res.status(409).json({ error: "duplicate_code", code: "project.duplicated" });
@@ -609,6 +906,45 @@ function parseProjectInput(body: unknown): ProjectInput | null {
   };
 }
 
+const COVER_CONTENT_TYPES: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif"
+};
+
+const MAX_COVER_BYTES = 5 * 1024 * 1024;
+
+function parseCoverUpload(body: unknown): { body: Buffer; contentType: string; ext: string } | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { contentType, dataBase64 } = body as Record<string, unknown>;
+  if (typeof contentType !== "string" || typeof dataBase64 !== "string" || dataBase64 === "") {
+    return null;
+  }
+
+  const ext = COVER_CONTENT_TYPES[contentType];
+  if (!ext) {
+    return null;
+  }
+
+  // Aceita tanto o base64 puro quanto uma data URL (data:image/...;base64,XXXX).
+  const base64 = dataBase64.includes(",") ? dataBase64.slice(dataBase64.indexOf(",") + 1) : dataBase64;
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(base64, "base64");
+  } catch {
+    return null;
+  }
+  if (buffer.length === 0 || buffer.length > MAX_COVER_BYTES) {
+    return null;
+  }
+
+  return { body: buffer, contentType, ext };
+}
+
 function parseId(raw: string): number | null {
   if (!/^\d+$/.test(raw)) {
     return null;
@@ -653,6 +989,68 @@ function parseStandardInput(body: unknown): StandardInput | null {
     description: normalizeOptional(description),
     version: normalizeOptional(version),
     active: active ?? true
+  };
+}
+
+function parseAssetInput(body: unknown): AssetInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { code, name, assetTypeId, projectId, active } = body as Record<string, unknown>;
+  if (typeof code !== "string" || code.trim() === "" || code.length > 60) {
+    return null;
+  }
+  if (typeof name !== "string" || name.trim() === "" || name.length > 200) {
+    return null;
+  }
+  if (!isPositiveInt(assetTypeId) || !isPositiveInt(projectId)) {
+    return null;
+  }
+  if (active !== undefined && typeof active !== "boolean") {
+    return null;
+  }
+
+  return {
+    code: code.trim(),
+    name: name.trim(),
+    assetTypeId,
+    projectId,
+    active: active ?? true
+  };
+}
+
+function isPositiveInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+const PERSON_STATUSES: PersonStatus[] = ["ACTIVE", "ON_LEAVE", "TERMINATED"];
+
+function parsePersonInput(body: unknown): PersonInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { name, registrationCode, role, status, projectId } = body as Record<string, unknown>;
+  if (typeof name !== "string" || name.trim() === "" || name.length > 200) {
+    return null;
+  }
+  if (!isOptionalString(registrationCode, 60) || !isOptionalString(role, 100)) {
+    return null;
+  }
+  if (status !== undefined && (typeof status !== "string" || !PERSON_STATUSES.includes(status as PersonStatus))) {
+    return null;
+  }
+  if (projectId !== undefined && projectId !== null && !isPositiveInt(projectId)) {
+    return null;
+  }
+
+  return {
+    name: name.trim(),
+    registrationCode: normalizeOptional(registrationCode),
+    role: normalizeOptional(role),
+    status: (status as PersonStatus | undefined) ?? "ACTIVE",
+    projectId: isPositiveInt(projectId) ? projectId : null
   };
 }
 

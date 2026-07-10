@@ -197,14 +197,14 @@ function textWebhook(body: string, chatId = CHAT_ID): WahaWebhook {
   };
 }
 
-function photoWebhook(id = "photo-1", filename = "foto.jpg"): WahaWebhook {
+function photoWebhook(id = "photo-1", filename = "foto.jpg", caption = ""): WahaWebhook {
   return {
     event: "message",
     session: "default",
     payload: {
       id,
       from: CHAT_ID,
-      body: "",
+      body: caption,
       hasMedia: true,
       media: {
         url: `http://waha.local/api/files/${filename}`,
@@ -838,6 +838,41 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
   });
 
+  it("uses the image caption as description and skips the description prompt", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("PROC-45/2026"));
+    await service.handleWebhook(photoWebhook("photo-1", "foto.jpg", "Parede norte concretada"));
+
+    expect(storage.uploads).toHaveLength(1);
+    expect(store.entradas).toMatchObject([{ description: "Parede norte concretada" }]);
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_POST_SAVE_CHOICE",
+      pendingEntradaId: null
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Incluir outro registro");
+  });
+
+  it("still asks for a description when the image has no caption", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(textWebhook("PROC-45/2026"));
+    await service.handleWebhook(photoWebhook());
+
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_DESCRIPTION");
+    expect(messaging.messages.at(-1)?.text).toContain("me conta o que foi feito");
+  });
+
   it("asks which obra to work on before showing the main menu when there are multiple", async () => {
     const { service, store, messaging } = createHarness();
     store.obras = [
@@ -1369,6 +1404,55 @@ describe("ConversationService", () => {
 
       expect(store.states.has(CHAT_ID)).toBe(false);
       expect(messaging.messages.at(-1)?.text).toContain("nao tem empresa vinculada");
+    });
+  });
+
+  it("resets to obra selection when the session is idle for more than 1 hour", async () => {
+    const { service, store, messaging } = createHarness();
+    store.obras = [
+      { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
+      { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
+    ];
+    store.states.set(CHAT_ID, {
+      chatId: CHAT_ID,
+      phoneE164: PHONE,
+      step: "AWAITING_PROCEDURE_NUMBER",
+      stepKey: "AWAITING_PROCEDURE_NUMBER",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora",
+      selectedTipo: "Inspecao de servico",
+      updatedAt: new Date(Date.now() - 61 * 60 * 1000)
+    });
+
+    await service.handleWebhook(textWebhook("PROC-45/2026"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      stepKey: "SELECT_OBRA",
+      flowData: expect.objectContaining({ selectedObraId: null })
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Em qual obra voce vai trabalhar hoje?");
+  });
+
+  it("keeps the session when the last message was under 1 hour ago", async () => {
+    const { service, store } = createHarness();
+    store.states.set(CHAT_ID, {
+      chatId: CHAT_ID,
+      phoneE164: PHONE,
+      step: "AWAITING_PROCEDURE_NUMBER",
+      stepKey: "AWAITING_PROCEDURE_NUMBER",
+      selectedObraId: 1,
+      selectedObraNome: "Obra Residencial Aurora",
+      selectedTipo: "Inspecao de servico",
+      selectedEmpresaId: 10n,
+      selectedTipoServico: "Alvenaria",
+      updatedAt: new Date(Date.now() - 59 * 60 * 1000)
+    });
+
+    await service.handleWebhook(textWebhook("PROC-45/2026"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PHOTO",
+      selectedNumeroProcedimento: "PROC-45/2026"
     });
   });
 

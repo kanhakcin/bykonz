@@ -930,6 +930,20 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         mediaUrl: objectPath
       });
 
+      const caption = (payload.body ?? "").trim();
+      if (caption) {
+        // Usuario mandou a descricao junto da imagem (legenda). Aproveita e conclui.
+        await this.finalizeEntradaDescription({
+          chatId,
+          phoneE164,
+          state,
+          entradaId: entrada.id,
+          description: caption,
+          confirmationText: "📸 Foto e descricao recebidas!"
+        });
+        return;
+      }
+
       await this.saveState({
         ...state,
         chatId,
@@ -961,7 +975,27 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.deps.store.updateEntradaDescription(state.pendingEntradaId, text);
+    await this.finalizeEntradaDescription({
+      chatId,
+      phoneE164: state.phoneE164,
+      state,
+      entradaId: state.pendingEntradaId,
+      description: text
+    });
+  }
+
+  /** Salva a descricao da entrada e leva o usuario ao menu pos-registro. */
+  private async finalizeEntradaDescription(input: {
+    chatId: string;
+    phoneE164: string;
+    state: ConversationStateRecord;
+    entradaId: bigint;
+    description: string;
+    confirmationText?: string;
+  }): Promise<void> {
+    const { chatId, phoneE164, state, entradaId, description, confirmationText } = input;
+
+    await this.deps.store.updateEntradaDescription(entradaId, description);
 
     if (!state.selectedObraId || !state.selectedObraNome) {
       await this.deps.store.clearState(chatId);
@@ -972,11 +1006,15 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     await this.saveState({
       ...state,
       chatId,
-      phoneE164: state.phoneE164,
+      phoneE164,
       step: "AWAITING_POST_SAVE_CHOICE",
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
+
+    if (confirmationText) {
+      await this.sendWithHeader(chatId, state.selectedObraNome, confirmationText);
+    }
     await this.sendWithHeader(chatId, state.selectedObraNome, postSaveMenuText());
   }
 

@@ -32,6 +32,9 @@ export type {
 
 const RESET_COMMANDS = new Set(["0", "menu", "cancelar"]);
 
+/** Sessao expira apos 1 hora sem mensagens; volta para a escolha de obra. */
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
 export class ConversationService {
   private readonly flowRegistry: FlowRegistry;
   private readonly chatLocks = new Map<string, Promise<void>>();
@@ -140,7 +143,17 @@ export class ConversationService {
       textLength: text.length
     });
 
-    if (!loadedState) {
+    if (!loadedState || this.isSessionExpired(loadedState)) {
+      if (loadedState) {
+        this.logWahaDebug("WAHA conversation session expired", {
+          chatId,
+          phoneE164,
+          userId: user.id,
+          updatedAt: loadedState.updatedAt?.toISOString() ?? null
+        });
+        await this.deps.store.clearState(chatId);
+      }
+
       const state = await this.createInitialState(chatId, phoneE164);
       this.logWahaDebug("WAHA conversation state created", {
         chatId,
@@ -240,6 +253,15 @@ export class ConversationService {
 
   private isResetCommand(text: string): boolean {
     return RESET_COMMANDS.has(text.toLowerCase());
+  }
+
+  private isSessionExpired(state: ConversationStateRecord): boolean {
+    const updatedAt = state.updatedAt;
+    if (!updatedAt) {
+      return false;
+    }
+
+    return Date.now() - updatedAt.getTime() > SESSION_TIMEOUT_MS;
   }
 }
 

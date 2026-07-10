@@ -1,21 +1,16 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 /**
- * Obra selecionada globalmente no painel (análogo ao useEnterpriseFilter do
- * template). Sem seleção, o backend usa a primeira obra ativa.
+ * Obra selecionada no painel. Fluxo "sempre escolher": a seleção vive apenas na
+ * sessão de navegação (não é persistida), então cada abertura/refresh do app
+ * começa sem obra e passa pela galeria de seleção (/obras).
  */
 interface ProjectFilterStore {
   projectId?: number;
   setProjectId: (projectId?: number) => void;
 }
 
-export const useProjectFilter = create<ProjectFilterStore>()(
-  persist(
-    (set) => ({
-      projectId: undefined,
-      setProjectId: (projectId) => set({ projectId }),
-    }),
-    { name: 'project-filter' },
-  ),
-);
+export const useProjectFilter = create<ProjectFilterStore>((set) => ({
+  projectId: undefined,
+  setProjectId: (projectId) => set({ projectId }),
+}));

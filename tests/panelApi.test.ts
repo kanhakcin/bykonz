@@ -5,14 +5,27 @@ import { createApp, type WebhookHandler } from "../src/app";
 import { createPanelRouter } from "../src/api/panelRouter";
 import { signPanelToken } from "../src/api/panelAuth";
 import {
+  AssetInUseError,
+  DuplicateAssetCodeError,
   DuplicatePanelUserEmailError,
+  DuplicatePersonCodeError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
   PanelService,
+  PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
   type AlertRecord,
+  type AssetInput,
+  type AssetListInput,
+  type AssetListResult,
+  type AssetRecord,
+  type AssetTypeRef,
   type CodeRef,
+  type PersonInput,
+  type PersonListInput,
+  type PersonListResult,
+  type PersonRecord,
   type DailyReportGenerator,
   type EntryRecord,
   type PanelStore,
@@ -59,8 +72,16 @@ class FakePanelStore implements PanelStore {
   standardRecords: StandardRecord[] = [];
   standardsInUse = new Set<number>();
   private nextStandardId = 1;
+  assetRecords: AssetRecord[] = [];
+  assetTypes: AssetTypeRef[] = [];
+  assetsInUse = new Set<number>();
+  private nextAssetId = 1;
+  personRecords: PersonRecord[] = [];
+  peopleInUse = new Set<number>();
+  private nextPersonId = 1;
   projectItems: ProjectListItem[] = [];
   projectsInUse = new Set<number>();
+  projectCoverKeys = new Map<number, string>();
   private nextProjectId = 1;
   people: PersonRef[] = [{ id: 118, name: "José Pereira", registrationCode: "MAT-118" }];
   machines: CodeRef[] = [{ id: 7, code: "MX-007" }];
@@ -119,6 +140,24 @@ class FakePanelStore implements PanelStore {
     this.standardRecords = [
       this.buildStandard({ code: "PS-024", title: "Grauteamento", description: null, version: "3", active: true }),
       this.buildStandard({ code: "PS-031", title: "Solda estrutural", description: "Procedimento de solda.", version: null, active: false })
+    ];
+
+    this.assetTypes = [
+      { id: 1, code: "OBRA", name: "Obra", level: 1, parentTypeId: null },
+      { id: 2, code: "TORRE", name: "Torre", level: 2, parentTypeId: 1 }
+    ];
+    this.nextAssetId = 1;
+    this.assetsInUse = new Set();
+    this.assetRecords = [
+      this.buildAsset({ code: "AT-001", name: "Torre A", assetTypeId: 2, projectId: 1, active: true }),
+      this.buildAsset({ code: "AT-002", name: "Betoneira 5", assetTypeId: 1, projectId: 1, active: false })
+    ];
+
+    this.nextPersonId = 1;
+    this.peopleInUse = new Set();
+    this.personRecords = [
+      this.buildPerson({ name: "José Pereira", registrationCode: "MAT-118", role: "Pedreiro", status: "ACTIVE", projectId: 1 }),
+      this.buildPerson({ name: "Ana Souza", registrationCode: "MAT-200", role: "Engenheira", status: "ON_LEAVE", projectId: null })
     ];
 
     this.entries = [
@@ -342,6 +381,130 @@ class FakePanelStore implements PanelStore {
     }
   }
 
+  async listAssets(input: AssetListInput): Promise<AssetListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.assetRecords
+      .filter((a) => !search || a.code.toLowerCase().includes(search) || a.name.toLowerCase().includes(search))
+      .sort((a, b) => a.code.localeCompare(b.code));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async findAssetById(id: number): Promise<AssetRecord | null> {
+    return this.assetRecords.find((a) => a.id === id) ?? null;
+  }
+
+  async createAsset(input: AssetInput): Promise<AssetRecord> {
+    this.assertUniqueAssetCode(input.code);
+    const asset = this.buildAsset(input);
+    this.assetRecords.push(asset);
+    return asset;
+  }
+
+  async updateAsset(id: number, input: AssetInput): Promise<AssetRecord | null> {
+    const asset = this.assetRecords.find((a) => a.id === id);
+    if (!asset) {
+      return null;
+    }
+    this.assertUniqueAssetCode(input.code, id);
+    Object.assign(asset, input, { assetTypeName: this.assetTypeName(input.assetTypeId) });
+    return asset;
+  }
+
+  async deleteAsset(id: number): Promise<boolean> {
+    if (this.assetsInUse.has(id)) {
+      throw new AssetInUseError(id);
+    }
+    const index = this.assetRecords.findIndex((a) => a.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.assetRecords.splice(index, 1);
+    return true;
+  }
+
+  async listAssetTypes(): Promise<AssetTypeRef[]> {
+    return this.assetTypes;
+  }
+
+  private buildAsset(input: AssetInput): AssetRecord {
+    return { id: this.nextAssetId++, ...input, assetTypeName: this.assetTypeName(input.assetTypeId) };
+  }
+
+  private assetTypeName(assetTypeId: number): string {
+    return this.assetTypes.find((t) => t.id === assetTypeId)?.name ?? "";
+  }
+
+  private assertUniqueAssetCode(code: string, exceptId?: number): void {
+    if (this.assetRecords.some((a) => a.code === code && a.id !== exceptId)) {
+      throw new DuplicateAssetCodeError(code);
+    }
+  }
+
+  async listPeople(input: PersonListInput): Promise<PersonListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.personRecords
+      .filter(
+        (p) =>
+          !search ||
+          p.name.toLowerCase().includes(search) ||
+          (p.registrationCode?.toLowerCase().includes(search) ?? false) ||
+          (p.role?.toLowerCase().includes(search) ?? false)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async findPersonById(id: number): Promise<PersonRecord | null> {
+    return this.personRecords.find((p) => p.id === id) ?? null;
+  }
+
+  async createPerson(input: PersonInput): Promise<PersonRecord> {
+    this.assertUniquePersonCode(input.registrationCode);
+    const person = this.buildPerson(input);
+    this.personRecords.push(person);
+    return person;
+  }
+
+  async updatePerson(id: number, input: PersonInput): Promise<PersonRecord | null> {
+    const person = this.personRecords.find((p) => p.id === id);
+    if (!person) {
+      return null;
+    }
+    this.assertUniquePersonCode(input.registrationCode, id);
+    Object.assign(person, input);
+    return person;
+  }
+
+  async deletePerson(id: number): Promise<boolean> {
+    if (this.peopleInUse.has(id)) {
+      throw new PersonInUseError(id);
+    }
+    const index = this.personRecords.findIndex((p) => p.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.personRecords.splice(index, 1);
+    return true;
+  }
+
+  private buildPerson(input: PersonInput): PersonRecord {
+    return { id: this.nextPersonId++, ...input };
+  }
+
+  private assertUniquePersonCode(code: string | null, exceptId?: number): void {
+    if (code && this.personRecords.some((p) => p.registrationCode === code && p.id !== exceptId)) {
+      throw new DuplicatePersonCodeError(code);
+    }
+  }
+
   async listProjects(input: ProjectListInput): Promise<ProjectListResult> {
     const search = input.search?.toLowerCase();
     const filtered = this.projectItems
@@ -388,8 +551,22 @@ class FakePanelStore implements PanelStore {
     return true;
   }
 
+  async setProjectCoverKey(id: number, key: string): Promise<boolean> {
+    const project = this.projectItems.find((p) => p.id === id);
+    if (!project) {
+      return false;
+    }
+    this.projectCoverKeys.set(id, key);
+    project.coverImage = `/projects/${id}/cover`;
+    return true;
+  }
+
+  async findProjectCoverKey(id: number): Promise<string | null> {
+    return this.projectCoverKeys.get(id) ?? null;
+  }
+
   private buildProject(input: ProjectInput): ProjectListItem {
-    return { id: this.nextProjectId++, ...input };
+    return { id: this.nextProjectId++, coverImage: null, ...input };
   }
 
   private assertUniqueProjectCode(code: string, exceptId?: number): void {
@@ -472,9 +649,13 @@ function toPanelUserListItem(user: PanelUserRecord): PanelUserListItem {
 let store: FakePanelStore;
 const storage = {
   downloads: [] as string[],
+  uploads: [] as { path: string; body: Buffer; contentType: string }[],
   async downloadPrivateObject(path: string): Promise<Buffer> {
     this.downloads.push(path);
     return Buffer.from(`image:${path}`);
+  },
+  async uploadPrivateObject(input: { path: string; body: Buffer; contentType: string }): Promise<void> {
+    this.uploads.push(input);
   }
 };
 
@@ -493,6 +674,7 @@ class FakeDailyReportGenerator implements DailyReportGenerator {
 function buildApp() {
   store = new FakePanelStore();
   storage.downloads = [];
+  storage.uploads = [];
   const service = new PanelService(store, {
     timezoneOffset: "-03:00",
     mediaStorage: storage,
@@ -902,6 +1084,312 @@ describe("standards CRUD", () => {
   });
 });
 
+describe("assets CRUD", () => {
+  it("lists assets ordered by code with the total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/assets").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data.map((a: { code: string }) => a.code)).toEqual(["AT-001", "AT-002"]);
+    expect(res.body.data[0]).toMatchObject({
+      code: "AT-001",
+      name: "Torre A",
+      assetTypeId: 2,
+      assetTypeName: "Torre",
+      projectId: 1,
+      active: true
+    });
+  });
+
+  it("filters by search and paginates", async () => {
+    const app = buildApp();
+
+    const searched = await request(app).get("/api/v1/assets?search=betoneira").set(auth);
+    expect(searched.body.totalCount).toBe(1);
+    expect(searched.body.data[0].code).toBe("AT-002");
+
+    const paged = await request(app).get("/api/v1/assets?page=1&size=1").set(auth);
+    expect(paged.body.totalCount).toBe(2);
+    expect(paged.body.data.map((a: { code: string }) => a.code)).toEqual(["AT-002"]);
+  });
+
+  it("rejects an invalid page size", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/assets?size=0").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_pagination");
+  });
+
+  it("lists asset types for the sector", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/asset-types").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.map((t: { code: string }) => t.code)).toEqual(["OBRA", "TORRE"]);
+  });
+
+  it("returns a single asset and 404 for unknown ids", async () => {
+    const app = buildApp();
+
+    const found = await request(app).get("/api/v1/assets/1").set(auth);
+    expect(found.status).toBe(200);
+    expect(found.body.code).toBe("AT-001");
+
+    const missing = await request(app).get("/api/v1/assets/999").set(auth);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe("asset_not_found");
+  });
+
+  it("creates an asset trimming the code and name", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/assets")
+      .set(auth)
+      .send({ code: " AT-010 ", name: " Guindaste ", assetTypeId: 1, projectId: 1 });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      code: "AT-010",
+      name: "Guindaste",
+      assetTypeId: 1,
+      projectId: 1,
+      active: true
+    });
+    expect(store.assetRecords).toHaveLength(3);
+  });
+
+  it("rejects an invalid payload", async () => {
+    const app = buildApp();
+    for (const payload of [
+      {},
+      { code: "AT-011" },
+      { code: "", name: "x", assetTypeId: 1, projectId: 1 },
+      { code: "AT-011", name: "x", assetTypeId: 0, projectId: 1 },
+      { code: "AT-011", name: "x", assetTypeId: 1 },
+      { code: "AT-011", name: "x", assetTypeId: 1, projectId: 1, active: "yes" }
+    ]) {
+      const res = await request(app).post("/api/v1/assets").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 409 with an i18n code for duplicated asset codes", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/assets")
+      .set(auth)
+      .send({ code: "AT-001", name: "Duplicado", assetTypeId: 1, projectId: 1 });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_code", code: "asset.duplicated" });
+  });
+
+  it("updates an asset", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/assets/2")
+      .set(auth)
+      .send({ code: "AT-002", name: "Betoneira 5 rev", assetTypeId: 1, projectId: 1, active: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 2, name: "Betoneira 5 rev", active: true });
+  });
+
+  it("returns 404 when updating an unknown asset", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/assets/999")
+      .set(auth)
+      .send({ code: "X", name: "Y", assetTypeId: 1, projectId: 1 });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 409 when updating to a code that already exists", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/assets/2")
+      .set(auth)
+      .send({ code: "AT-001", name: "Betoneira", assetTypeId: 1, projectId: 1 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("asset.duplicated");
+  });
+
+  it("deletes an asset", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/assets/1").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(store.assetRecords.map((a) => a.id)).toEqual([2]);
+
+    const again = await request(app).delete("/api/v1/assets/1").set(auth);
+    expect(again.status).toBe(404);
+  });
+
+  it("returns 409 when deleting an asset in use", async () => {
+    const app = buildApp();
+    store.assetsInUse.add(1);
+
+    const res = await request(app).delete("/api/v1/assets/1").set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "asset_in_use", code: "asset.inUse" });
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/assets");
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("people CRUD", () => {
+  it("lists people ordered by name with the total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/people").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data.map((p: { name: string }) => p.name)).toEqual(["Ana Souza", "José Pereira"]);
+    expect(res.body.data[1]).toMatchObject({
+      name: "José Pereira",
+      registrationCode: "MAT-118",
+      role: "Pedreiro",
+      status: "ACTIVE",
+      projectId: 1
+    });
+  });
+
+  it("filters by search and paginates", async () => {
+    const app = buildApp();
+
+    const searched = await request(app).get("/api/v1/people?search=engenheira").set(auth);
+    expect(searched.body.totalCount).toBe(1);
+    expect(searched.body.data[0].name).toBe("Ana Souza");
+
+    const paged = await request(app).get("/api/v1/people?page=1&size=1").set(auth);
+    expect(paged.body.totalCount).toBe(2);
+    expect(paged.body.data.map((p: { name: string }) => p.name)).toEqual(["José Pereira"]);
+  });
+
+  it("rejects an invalid page size", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/people?size=0").set(auth);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_pagination");
+  });
+
+  it("returns a single person and 404 for unknown ids", async () => {
+    const app = buildApp();
+
+    const found = await request(app).get("/api/v1/people/1").set(auth);
+    expect(found.status).toBe(200);
+    expect(found.body.name).toBe("José Pereira");
+
+    const missing = await request(app).get("/api/v1/people/999").set(auth);
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toBe("person_not_found");
+  });
+
+  it("creates a person normalizing optional fields and defaulting status", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/people")
+      .set(auth)
+      .send({ name: " Carlos Lima ", registrationCode: "  ", role: "" });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      name: "Carlos Lima",
+      registrationCode: null,
+      role: null,
+      status: "ACTIVE",
+      projectId: null
+    });
+    expect(store.personRecords).toHaveLength(3);
+  });
+
+  it("rejects an invalid payload", async () => {
+    const app = buildApp();
+    for (const payload of [
+      {},
+      { name: "" },
+      { name: "X", status: "UNKNOWN" },
+      { name: "X", projectId: 0 }
+    ]) {
+      const res = await request(app).post("/api/v1/people").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 409 with an i18n code for duplicated registration codes", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/people")
+      .set(auth)
+      .send({ name: "Duplicado", registrationCode: "MAT-118" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_code", code: "person.duplicated" });
+  });
+
+  it("updates a person", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/people/2")
+      .set(auth)
+      .send({ name: "Ana Souza", registrationCode: "MAT-200", role: "Engenheira Civil", status: "ACTIVE" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: 2, role: "Engenheira Civil", status: "ACTIVE" });
+  });
+
+  it("returns 404 when updating an unknown person", async () => {
+    const app = buildApp();
+    const res = await request(app).put("/api/v1/people/999").set(auth).send({ name: "Y" });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 409 when updating to a code that already exists", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/people/2")
+      .set(auth)
+      .send({ name: "Ana Souza", registrationCode: "MAT-118" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("person.duplicated");
+  });
+
+  it("deletes a person", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/people/1").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(store.personRecords.map((p) => p.id)).toEqual([2]);
+
+    const again = await request(app).delete("/api/v1/people/1").set(auth);
+    expect(again.status).toBe(404);
+  });
+
+  it("returns 409 when deleting a person in use", async () => {
+    const app = buildApp();
+    store.peopleInUse.add(1);
+
+    const res = await request(app).delete("/api/v1/people/1").set(auth);
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "person_in_use", code: "person.inUse" });
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/people");
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("projects CRUD", () => {
   it("lists projects ordered by name with the total count", async () => {
     const app = buildApp();
@@ -1027,6 +1515,74 @@ describe("projects CRUD", () => {
 
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: "project_in_use", code: "project.inUse" });
+  });
+
+  it("uploads a cover image, storing it privately and persisting the key", async () => {
+    const app = buildApp();
+    const pngBase64 = Buffer.from("fake-png-bytes").toString("base64");
+    const res = await request(app)
+      .post("/api/v1/projects/1/cover")
+      .set(auth)
+      .send({ contentType: "image/png", dataBase64: pngBase64 });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ coverImage: "/projects/1/cover" });
+    expect(storage.uploads).toHaveLength(1);
+    expect(storage.uploads[0]?.path).toMatch(/^panel\/projects\/1\/cover-\d+\.png$/);
+    expect(storage.uploads[0]?.contentType).toBe("image/png");
+    // A obra passa a expor a URL de download da capa.
+    const found = await request(app).get("/api/v1/projects/1").set(auth);
+    expect(found.body.coverImage).toBe("/projects/1/cover");
+  });
+
+  it("accepts a data URL payload for the cover", async () => {
+    const app = buildApp();
+    const dataUrl = `data:image/jpeg;base64,${Buffer.from("jpg-bytes").toString("base64")}`;
+    const res = await request(app).post("/api/v1/projects/1/cover").set(auth).send({ contentType: "image/jpeg", dataBase64: dataUrl });
+
+    expect(res.status).toBe(200);
+    expect(storage.uploads[0]?.path).toMatch(/\.jpg$/);
+  });
+
+  it("rejects an invalid cover payload", async () => {
+    const app = buildApp();
+    for (const payload of [{}, { contentType: "image/png" }, { contentType: "text/plain", dataBase64: "abc" }, { dataBase64: "abc" }]) {
+      const res = await request(app).post("/api/v1/projects/1/cover").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("returns 404 uploading a cover to an unknown project", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects/999/cover")
+      .set(auth)
+      .send({ contentType: "image/png", dataBase64: Buffer.from("x").toString("base64") });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("project_not_found");
+  });
+
+  it("downloads the cover from private storage", async () => {
+    const app = buildApp();
+    await request(app)
+      .post("/api/v1/projects/1/cover")
+      .set(auth)
+      .send({ contentType: "image/png", dataBase64: Buffer.from("x").toString("base64") });
+
+    const res = await request(app).get("/api/v1/projects/1/cover").set(auth);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/png");
+    expect(storage.downloads).toHaveLength(1);
+    expect(res.body).toBeInstanceOf(Buffer);
+  });
+
+  it("returns 404 downloading a cover when the project has none", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/projects/2/cover").set(auth);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("cover_not_found");
   });
 
   it("requires authentication", async () => {

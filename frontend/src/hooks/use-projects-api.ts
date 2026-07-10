@@ -42,6 +42,25 @@ async function deleteProject(id: number): Promise<void> {
   await api.delete(`/projects/${id}`);
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Sobe a imagem de capa da obra (base64 JSON); retorna a URL relativa de download. */
+async function uploadProjectCover({ id, file }: { id: number; file: File }): Promise<{ coverImage: string }> {
+  const dataBase64 = await fileToDataUrl(file);
+  const response = await api.post<{ coverImage: string }>(`/projects/${id}/cover`, {
+    contentType: file.type,
+    dataBase64,
+  });
+  return response.data;
+}
+
 export function useProjects(params: ProjectListParams) {
   return useQuery({
     queryKey: projectsKeys.list({ ...params }),
@@ -96,9 +115,15 @@ export function useProjectsApi() {
     onSuccess: () => invalidate(),
   });
 
+  const uploadCoverMutation = useMutation({
+    mutationFn: uploadProjectCover,
+    onSuccess: (_data, variables) => invalidate(variables.id),
+  });
+
   return {
     createProject: createProjectMutation,
     updateProject: updateProjectMutation,
     deleteProject: deleteProjectMutation,
+    uploadCover: uploadCoverMutation,
   };
 }

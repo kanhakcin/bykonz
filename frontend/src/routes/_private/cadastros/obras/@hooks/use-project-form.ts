@@ -6,10 +6,10 @@ import { toast } from 'sonner';
 import { useProjectsApi } from '@/hooks/use-projects-api';
 import { type ProjectFormData, projectFormSchema } from '../@interface/project.interface';
 
-export function useProjectForm(initialData?: ProjectFormData) {
+export function useProjectForm(initialData?: ProjectFormData, coverFile?: File | null) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { createProject, updateProject } = useProjectsApi();
+  const { createProject, updateProject, uploadCover } = useProjectsApi();
 
   const form = useForm<ProjectFormData>({
     resolver: zodResolver(projectFormSchema),
@@ -27,10 +27,10 @@ export function useProjectForm(initialData?: ProjectFormData) {
 
   const onSubmit = form.handleSubmit(async (data) => {
     try {
-      if (data.id) {
-        await updateProject.mutateAsync({ ...data, id: data.id });
-      } else {
-        await createProject.mutateAsync(data);
+      // A capa é enviada à parte (precisa do id da obra) — no create, após salvar.
+      const saved = data.id ? await updateProject.mutateAsync({ ...data, id: data.id }) : await createProject.mutateAsync(data);
+      if (coverFile) {
+        await uploadCover.mutateAsync({ id: saved.id, file: coverFile });
       }
       toast.success(t('save.success'));
       navigate({ to: '/cadastros/obras' });
@@ -42,6 +42,6 @@ export function useProjectForm(initialData?: ProjectFormData) {
   return {
     form,
     onSubmit,
-    isPending: createProject.isPending || updateProject.isPending,
+    isPending: createProject.isPending || updateProject.isPending || uploadCover.isPending,
   };
 }

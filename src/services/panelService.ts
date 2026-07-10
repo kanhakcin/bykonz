@@ -87,6 +87,8 @@ export interface ProjectListItem {
   name: string;
   context: string | null;
   active: boolean;
+  /** URL relativa da capa (`/projects/:id/cover`) quando a obra tem imagem; senão null. */
+  coverImage: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
 }
@@ -140,6 +142,78 @@ export interface StandardListInput {
 
 export interface StandardListResult {
   data: StandardRecord[];
+  totalCount: number;
+}
+
+// ---- Assets registry -------------------------------------------------------
+
+export interface AssetRecord {
+  id: number;
+  code: string;
+  name: string;
+  assetTypeId: number;
+  assetTypeName: string;
+  projectId: number;
+  active: boolean;
+}
+
+export interface AssetInput {
+  code: string;
+  name: string;
+  assetTypeId: number;
+  projectId: number;
+  active: boolean;
+}
+
+export interface AssetListInput {
+  search?: string;
+  page: number;
+  size: number;
+}
+
+export interface AssetListResult {
+  data: AssetRecord[];
+  totalCount: number;
+}
+
+/** Tipo de ativo do setor, para popular o select do formulário. */
+export interface AssetTypeRef {
+  id: number;
+  code: string;
+  name: string;
+  level: number;
+  parentTypeId: number | null;
+}
+
+// ---- People registry -------------------------------------------------------
+
+export type PersonStatus = "ACTIVE" | "ON_LEAVE" | "TERMINATED";
+
+export interface PersonRecord {
+  id: number;
+  name: string;
+  registrationCode: string | null;
+  role: string | null;
+  status: PersonStatus;
+  projectId: number | null;
+}
+
+export interface PersonInput {
+  name: string;
+  registrationCode: string | null;
+  role: string | null;
+  status: PersonStatus;
+  projectId: number | null;
+}
+
+export interface PersonListInput {
+  search?: string;
+  page: number;
+  size: number;
+}
+
+export interface PersonListResult {
+  data: PersonRecord[];
   totalCount: number;
 }
 
@@ -202,11 +276,26 @@ export interface PanelStore {
   createStandard(input: StandardInput): Promise<StandardRecord>;
   updateStandard(id: number, input: StandardInput): Promise<StandardRecord | null>;
   deleteStandard(id: number): Promise<boolean>;
+  listAssets(input: AssetListInput): Promise<AssetListResult>;
+  findAssetById(id: number): Promise<AssetRecord | null>;
+  createAsset(input: AssetInput): Promise<AssetRecord>;
+  updateAsset(id: number, input: AssetInput): Promise<AssetRecord | null>;
+  deleteAsset(id: number): Promise<boolean>;
+  listAssetTypes(): Promise<AssetTypeRef[]>;
+  listPeople(input: PersonListInput): Promise<PersonListResult>;
+  findPersonById(id: number): Promise<PersonRecord | null>;
+  createPerson(input: PersonInput): Promise<PersonRecord>;
+  updatePerson(id: number, input: PersonInput): Promise<PersonRecord | null>;
+  deletePerson(id: number): Promise<boolean>;
   listProjects(input: ProjectListInput): Promise<ProjectListResult>;
   findProjectItemById(id: number): Promise<ProjectListItem | null>;
   createProject(input: ProjectInput): Promise<ProjectListItem>;
   updateProject(id: number, input: ProjectInput): Promise<ProjectListItem | null>;
   deleteProject(id: number): Promise<boolean>;
+  /** Grava a key S3 da capa em attributes.coverImage; retorna false se a obra não existe. */
+  setProjectCoverKey(id: number, key: string): Promise<boolean>;
+  /** Lê a key S3 da capa (attributes.coverImage) ou null se a obra não tem capa. */
+  findProjectCoverKey(id: number): Promise<string | null>;
   listPanelUsers(input: PanelUserListInput): Promise<PanelUserListResult>;
   findPanelUserById(id: number): Promise<PanelUserListItem | null>;
   findPanelUserByEmail(email: string): Promise<PanelUserRecord | null>;
@@ -287,6 +376,7 @@ export interface DiaryDay {
 
 export interface PanelMediaStorage {
   downloadPrivateObject(path: string): Promise<Buffer>;
+  uploadPrivateObject(input: { path: string; body: Buffer; contentType: string }): Promise<void>;
 }
 
 export interface DiaryMedia {
@@ -482,6 +572,50 @@ export class PanelService {
     return this.store.deleteStandard(id);
   }
 
+  listAssets(input: AssetListInput): Promise<AssetListResult> {
+    return this.store.listAssets(input);
+  }
+
+  getAsset(id: number): Promise<AssetRecord | null> {
+    return this.store.findAssetById(id);
+  }
+
+  createAsset(input: AssetInput): Promise<AssetRecord> {
+    return this.store.createAsset(input);
+  }
+
+  updateAsset(id: number, input: AssetInput): Promise<AssetRecord | null> {
+    return this.store.updateAsset(id, input);
+  }
+
+  deleteAsset(id: number): Promise<boolean> {
+    return this.store.deleteAsset(id);
+  }
+
+  listAssetTypes(): Promise<AssetTypeRef[]> {
+    return this.store.listAssetTypes();
+  }
+
+  listPeople(input: PersonListInput): Promise<PersonListResult> {
+    return this.store.listPeople(input);
+  }
+
+  getPerson(id: number): Promise<PersonRecord | null> {
+    return this.store.findPersonById(id);
+  }
+
+  createPerson(input: PersonInput): Promise<PersonRecord> {
+    return this.store.createPerson(input);
+  }
+
+  updatePerson(id: number, input: PersonInput): Promise<PersonRecord | null> {
+    return this.store.updatePerson(id, input);
+  }
+
+  deletePerson(id: number): Promise<boolean> {
+    return this.store.deletePerson(id);
+  }
+
   listProjects(input: ProjectListInput): Promise<ProjectListResult> {
     return this.store.listProjects(input);
   }
@@ -500,6 +634,41 @@ export class PanelService {
 
   deleteProject(id: number): Promise<boolean> {
     return this.store.deleteProject(id);
+  }
+
+  /**
+   * Sobe a imagem de capa da obra para o storage privado (S3) e persiste a key
+   * em attributes.coverImage. A key é montada pelo router (inclui timestamp) para
+   * manter este método determinístico/testável. Retorna false se a obra não existe.
+   */
+  async uploadProjectCover(id: number, input: { key: string; body: Buffer; contentType: string }): Promise<boolean> {
+    if (!this.options.mediaStorage) {
+      throw new Error("Panel media storage is not configured");
+    }
+
+    await this.options.mediaStorage.uploadPrivateObject({
+      path: input.key,
+      body: input.body,
+      contentType: input.contentType
+    });
+    return this.store.setProjectCoverKey(id, input.key);
+  }
+
+  /** Lê a imagem de capa da obra do storage privado; null se a obra não tem capa. */
+  async getProjectCover(id: number): Promise<DiaryMedia | null> {
+    if (!this.options.mediaStorage) {
+      throw new Error("Panel media storage is not configured");
+    }
+
+    const key = await this.store.findProjectCoverKey(id);
+    if (!key) {
+      return null;
+    }
+
+    return {
+      body: await this.options.mediaStorage.downloadPrivateObject(key),
+      contentType: contentTypeFromPath(key)
+    };
   }
 
   async verifyPanelUserCredentials(email: string, password: string): Promise<PanelUserListItem | null> {
@@ -683,6 +852,38 @@ export class StandardInUseError extends Error {
   constructor(id: number) {
     super(`Standard ${id} is referenced and cannot be deleted`);
     this.name = "StandardInUseError";
+  }
+}
+
+/** An asset with the same code already exists in the sector. */
+export class DuplicateAssetCodeError extends Error {
+  constructor(code: string) {
+    super(`Asset code already exists: ${code}`);
+    this.name = "DuplicateAssetCodeError";
+  }
+}
+
+/** The asset is referenced (inspections/entries) and cannot be deleted. */
+export class AssetInUseError extends Error {
+  constructor(id: number) {
+    super(`Asset ${id} is referenced and cannot be deleted`);
+    this.name = "AssetInUseError";
+  }
+}
+
+/** A person with the same registration code already exists in the sector. */
+export class DuplicatePersonCodeError extends Error {
+  constructor(code: string) {
+    super(`Person registration code already exists: ${code}`);
+    this.name = "DuplicatePersonCodeError";
+  }
+}
+
+/** The person is referenced (competencies/inspections) and cannot be deleted. */
+export class PersonInUseError extends Error {
+  constructor(id: number) {
+    super(`Person ${id} is referenced and cannot be deleted`);
+    this.name = "PersonInUseError";
   }
 }
 

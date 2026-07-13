@@ -13,6 +13,8 @@ export type {
   ConversationStore,
   CreateEntradaInput,
   CreateTreinamentoInput,
+  DailyReportGenerator,
+  DailyReportInput,
   EmpresaRecord,
   EntradaForReport,
   FlowData,

@@ -11,10 +11,12 @@ import {
   type ObjectStorage,
   type ObraForReport,
   type ObraRecord,
+  type DailyReportInput,
   type PdfGenerator,
   type ReportInput,
   type UserRecord
 } from "../src/services/conversationService";
+import { DailyReportService } from "../src/services/dailyReportService";
 import type { WahaWebhook } from "../src/types/waha";
 
 const CHAT_ID = "5511999999999@c.us";
@@ -103,6 +105,18 @@ class FakeStore implements ConversationStore {
     }
   }
 
+  async updateEntradaProcedureNumber(entradaId: bigint, numeroProcedimento: string): Promise<void> {
+    const entrada = this.entradas.find((item) => item.id === entradaId);
+    if (entrada) {
+      entrada.numeroProcedimento = numeroProcedimento;
+    }
+  }
+
+  /** Regex simples só para testes: considera que há procedimento se casar um código tipo PS-031. */
+  async hasProcedureCode(input: { obraId?: number | null; text: string }): Promise<boolean> {
+    return /\b[A-Za-z]+-\d+\b/.test(input.text) || /\([A-Za-z]+-?\d+\)/.test(input.text);
+  }
+
   async findEntradasForReport(_input: {
     empresaId: bigint;
     obraId?: number | null;
@@ -157,9 +171,15 @@ class FakeStorage implements ObjectStorage {
 
 class FakePdfGenerator implements PdfGenerator {
   calls: ReportInput[] = [];
+  dailyCalls: DailyReportInput[] = [];
 
   async generateReport(input: ReportInput): Promise<Buffer> {
     this.calls.push(input);
+    return Buffer.from("%PDF-1.4 fake");
+  }
+
+  async generateDailyReport(input: DailyReportInput): Promise<Buffer> {
+    this.dailyCalls.push(input);
     return Buffer.from("%PDF-1.4 fake");
   }
 }
@@ -176,7 +196,9 @@ function createHarness(overrides: { download?: () => Promise<Buffer> } = {}) {
       download: overrides.download ?? (async () => Buffer.from("fake-image"))
     },
     objectStorage: storage,
-    pdfGenerator
+    pdfGenerator,
+    // Mesmo serviço usado pelo painel: menu 7 gera o PDF do diário do dia.
+    dailyReport: new DailyReportService(store, pdfGenerator)
   });
 
   store.users.set(PHONE, { id: 7, phoneE164: PHONE, nome: "Usuario Teste" });
@@ -509,23 +531,20 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("tema do treinamento");
   });
 
-  it("routes the Gerar diario de obra selection into the report flow", async () => {
+  it("routes the Gerar diario de obra selection straight to the date prompt", async () => {
     const { service, store, messaging } = createHarness();
-    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await service.handleWebhook(textWebhook("oi"));
     await service.handleWebhook(textWebhook("7"));
 
+    // Diário cobre a obra toda: não pede empresa nem tipo.
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_REPORT_DATE",
       flowKey: "diario-das-obras",
-      stepKey: "AWAITING_REPORT_DATE",
-      selectedTipo: "Inspecao de servico",
-      selectedEmpresaId: 10n,
-      flowData: expect.objectContaining({
-        selectedTipo: "Inspecao de servico",
-        selectedEmpresaId: "10"
-      })
+      stepKey: "AWAITING_DIARIO_OBRA_DATE",
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedObraId: 1
     });
     expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
   });
@@ -734,7 +753,7 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Não entendi");
   });
 
-  it("asks service type and procedure number before photo, then saves the description", async () => {
+  it("asks service type then goes straight to the photo, taking the procedure from the description", async () => {
     const { service, store, messaging, storage } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
@@ -749,24 +768,23 @@ describe("ConversationService", () => {
     });
     expect(messaging.messages.at(-1)?.text).toContain("Qual o tipo de serviço?");
 
+    // Após escolher o tipo de serviço vai direto para a foto — sem perguntar o procedimento.
     await service.handleWebhook(textWebhook("2"));
     expect(store.states.get(CHAT_ID)).toMatchObject({
-      step: "AWAITING_PROCEDURE_NUMBER",
-      selectedTipoServico: "Hidráulica"
-    });
-    expect(messaging.messages.at(-1)?.text).toContain("número do procedimento");
-
-    await service.handleWebhook(textWebhook("PROC-45/2026"));
-    expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_PHOTO",
-      selectedNumeroProcedimento: "PROC-45/2026"
+      selectedTipoServico: "Hidráulica",
+      selectedNumeroProcedimento: null
     });
     expect(messaging.messages.at(-1)?.text).toContain("Obra: Obra Residencial Aurora");
     expect(messaging.messages.at(-1)?.text).toContain("Hidráulica");
-    expect(messaging.messages.at(-1)?.text).toContain("PROC-45/2026");
+    expect(messaging.messages.at(-1)?.text).toContain("envie uma foto");
+    // Não faz mais a pergunta dedicada do procedimento antes da foto.
+    expect(messaging.messages.at(-1)?.text).not.toContain("Qual o número do procedimento");
+    expect(messaging.messages.at(-1)?.text).not.toContain("Faltou você informar");
 
     await service.handleWebhook(photoWebhook());
-    await service.handleWebhook(textWebhook("Parede norte concretada"));
+    // A descrição traz o código do procedimento (PS-031) — o sistema aceita e conclui.
+    await service.handleWebhook(textWebhook("Parede norte concretada (PS-031)"));
 
     expect(storage.uploads).toHaveLength(1);
     expect(storage.uploads[0].path).toContain("entradas/10/obras/1/");
@@ -777,8 +795,7 @@ describe("ConversationService", () => {
         obraId: 1,
         tipo: "Inspecao de servico",
         tipoServico: "Hidráulica",
-        numeroProcedimento: "PROC-45/2026",
-        description: "Parede norte concretada"
+        description: "Parede norte concretada (PS-031)"
       }
     ]);
     expect(store.media[0].mediaUrl).toBe(storage.uploads[0].path);
@@ -790,6 +807,37 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Incluir outro registro");
   });
 
+  it("asks for the procedure number only when the description does not contain a code", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(photoWebhook());
+    // Descrição sem código de procedimento.
+    await service.handleWebhook(textWebhook("Parede norte concretada"));
+
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PROCEDURE_NUMBER",
+      pendingEntradaId: 1n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
+
+    // Usuário informa o número no fallback — vira o procedureNumber do registro.
+    await service.handleWebhook(textWebhook("PS-031"));
+
+    expect(store.entradas).toMatchObject([
+      {
+        description: "Parede norte concretada",
+        numeroProcedimento: "PS-031"
+      }
+    ]);
+    expect(store.states.get(CHAT_ID)).toMatchObject({ step: "AWAITING_POST_SAVE_CHOICE" });
+    expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+  });
+
   it("lets the user add another entry of the same tipo right after saving, without losing the obra", async () => {
     const { service, store, messaging, storage } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
@@ -798,9 +846,8 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
-    await service.handleWebhook(textWebhook("PROC-45/2026"));
     await service.handleWebhook(photoWebhook());
-    await service.handleWebhook(textWebhook("Parede norte concretada"));
+    await service.handleWebhook(textWebhook("Parede norte concretada (PS-045)"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_POST_SAVE_CHOICE",
@@ -818,14 +865,13 @@ describe("ConversationService", () => {
     });
 
     await service.handleWebhook(textWebhook("2"));
-    await service.handleWebhook(textWebhook("PROC-46/2026"));
     await service.handleWebhook(photoWebhook());
-    await service.handleWebhook(textWebhook("Parede sul concretada"));
+    await service.handleWebhook(textWebhook("Parede sul concretada (PS-046)"));
 
     expect(storage.uploads).toHaveLength(2);
     expect(store.entradas).toMatchObject([
-      { numeroProcedimento: "PROC-45/2026", description: "Parede norte concretada" },
-      { numeroProcedimento: "PROC-46/2026", description: "Parede sul concretada" }
+      { description: "Parede norte concretada (PS-045)" },
+      { description: "Parede sul concretada (PS-046)" }
     ]);
     expect(store.states.get(CHAT_ID)).toMatchObject({ step: "AWAITING_POST_SAVE_CHOICE" });
 
@@ -846,11 +892,10 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
-    await service.handleWebhook(textWebhook("PROC-45/2026"));
-    await service.handleWebhook(photoWebhook("photo-1", "foto.jpg", "Parede norte concretada"));
+    await service.handleWebhook(photoWebhook("photo-1", "foto.jpg", "Parede norte concretada (PS-031)"));
 
     expect(storage.uploads).toHaveLength(1);
-    expect(store.entradas).toMatchObject([{ description: "Parede norte concretada" }]);
+    expect(store.entradas).toMatchObject([{ description: "Parede norte concretada (PS-031)" }]);
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_POST_SAVE_CHOICE",
       pendingEntradaId: null
@@ -866,11 +911,28 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("2"));
-    await service.handleWebhook(textWebhook("PROC-45/2026"));
     await service.handleWebhook(photoWebhook());
 
     expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_DESCRIPTION");
     expect(messaging.messages.at(-1)?.text).toContain("me conta o que foi feito");
+  });
+
+  it("asks for the procedure number when the caption has no code", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("1"));
+    await service.handleWebhook(textWebhook("2"));
+    await service.handleWebhook(photoWebhook("photo-1", "foto.jpg", "Parede norte concretada"));
+
+    expect(store.entradas).toMatchObject([{ description: "Parede norte concretada" }]);
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PROCEDURE_NUMBER",
+      pendingEntradaId: 1n
+    });
+    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
   });
 
   it("asks which obra to work on before showing the main menu when there are multiple", async () => {
@@ -958,9 +1020,8 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("6"));
-    await service.handleWebhook(textWebhook("PROC-01/2026"));
     await service.handleWebhook(photoWebhook());
-    await service.handleWebhook(textWebhook("Concretagem da laje 14"));
+    await service.handleWebhook(textWebhook("Concretagem da laje 14 (PS-001)"));
 
     expect(store.entradas).toMatchObject([
       {
@@ -969,8 +1030,7 @@ describe("ConversationService", () => {
         obraId: 4,
         tipo: "Inspecao de servico",
         tipoServico: "Concretagem",
-        numeroProcedimento: "PROC-01/2026",
-        description: "Concretagem da laje 14"
+        description: "Concretagem da laje 14 (PS-001)"
       }
     ]);
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -1151,7 +1211,7 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Não entendi. Digite um numero de 1 a 7.");
   });
 
-  it("re-prompts when the procedure number is blank", async () => {
+  it("re-prompts when the procedure number is blank in the fallback step", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
@@ -1159,14 +1219,19 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("4"));
+    await service.handleWebhook(photoWebhook());
+    // Descrição sem código -> cai no fallback pedindo o procedimento.
+    await service.handleWebhook(textWebhook("Limpeza do canteiro"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_PROCEDURE_NUMBER");
+
+    // Resposta em branco no fallback deve repetir a pergunta.
     await service.handleWebhook(textWebhook("   "));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_PROCEDURE_NUMBER",
       selectedTipoServico: "Organização e Limpeza"
     });
-    expect(messaging.messages.at(-1)?.text).toContain("número do procedimento");
-    expect(store.entradas).toHaveLength(0);
+    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
   });
 
   it("responds to the user when photo processing fails", async () => {
@@ -1181,13 +1246,12 @@ describe("ConversationService", () => {
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("1"));
     await service.handleWebhook(textWebhook("6"));
-    await service.handleWebhook(textWebhook("99-A"));
     await service.handleWebhook(photoWebhook());
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_PHOTO",
       selectedTipoServico: "Concretagem",
-      selectedNumeroProcedimento: "99-A"
+      selectedNumeroProcedimento: null
     });
     expect(messaging.messages.at(-1)?.text).toContain("Deu um problema pra salvar a foto");
   });
@@ -1232,99 +1296,119 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
+  it("consulta via action menu still uses the legacy report layout (generateReport)", async () => {
+    const { service, store, messaging, pdfGenerator } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    store.reportEntradas = [
+      {
+        id: 1n,
+        description: "Nao conformidade aberta",
+        createdAt: new Date("2026-06-22T10:00:00Z"),
+        tipo: "Abrir nao conformidade",
+        tipoServico: null,
+        numeroProcedimento: null,
+        empresaNome: "Obra Centro",
+        usuarioNome: "Joao",
+        mediaUrls: []
+      }
+    ];
+
+    await service.handleWebhook(textWebhook("oi"));
+    await service.handleWebhook(textWebhook("2")); // Abrir nao conformidade
+    await service.handleWebhook(textWebhook("1")); // Consulta
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
+    expect(store.states.get(CHAT_ID)?.stepKey).toBe("AWAITING_REPORT_DATE");
+
+    await service.handleWebhook(textWebhook("22/06/2026"));
+
+    expect(pdfGenerator.calls).toHaveLength(1);
+    expect(pdfGenerator.calls[0]).toMatchObject({
+      categoria: "Abrir nao conformidade",
+      empresaNome: "Obra Centro",
+      reportDate: "22/06/2026"
+    });
+    expect(pdfGenerator.dailyCalls).toHaveLength(0);
+    expect(messaging.files).toHaveLength(1);
+  });
+
   describe("Gerar diario de obra flow", () => {
-    it("with one empresa goes directly to AWAITING_REPORT_DATE and asks for date", async () => {
+    const OBRA_FOR_REPORT: ObraForReport = {
+      id: 1,
+      nome: "Obra Residencial Aurora",
+      codigo: "130",
+      construtoraNome: "Construtora Tanen",
+      whatsappGroupId: null,
+      whatsappAutoReportEnabled: false,
+      status: "ACTIVE"
+    };
+
+    it("asks only for the date, without empresa selection", async () => {
       const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
 
       expect(store.states.get(CHAT_ID)).toMatchObject({
         step: "AWAITING_REPORT_DATE",
-        selectedTipo: "Inspecao de servico",
-        selectedEmpresaId: 10n
+        stepKey: "AWAITING_DIARIO_OBRA_DATE",
+        selectedTipo: null,
+        selectedEmpresaId: null,
+        selectedObraId: 1
       });
       expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
     });
 
-    it("with multiple empresas shows SELECT_EMPRESA_FOR_REPORT then transitions to date prompt", async () => {
-      const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [
-        { id: 10n, nome: "Obra Centro" },
-        { id: 20n, nome: "Obra Sul" }
-      ]);
-
-      await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("7"));
-
-      expect(store.states.get(CHAT_ID)?.step).toBe("SELECT_EMPRESA_FOR_REPORT");
-      expect(messaging.messages.at(-1)?.text).toContain("1) Obra Centro");
-      expect(messaging.messages.at(-1)?.text).toContain("2) Obra Sul");
-
-      await service.handleWebhook(textWebhook("2"));
-
-      expect(store.states.get(CHAT_ID)).toMatchObject({
-        step: "AWAITING_REPORT_DATE",
-        selectedEmpresaId: 20n
-      });
-      expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
-    });
-
-    it("rejects invalid date formats and stays in AWAITING_REPORT_DATE", async () => {
+    it("rejects invalid date formats and stays awaiting the date", async () => {
       const { service, store, messaging, pdfGenerator } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("32/13/2026"));
 
-      expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
+      expect(store.states.get(CHAT_ID)?.stepKey).toBe("AWAITING_DIARIO_OBRA_DATE");
       expect(messaging.messages.at(-1)?.text).toContain("Não entendi essa data");
-      expect(pdfGenerator.calls).toHaveLength(0);
+      expect(pdfGenerator.dailyCalls).toHaveLength(0);
     });
 
-    it("rejects impossible calendar dates and stays in AWAITING_REPORT_DATE", async () => {
+    it("rejects impossible calendar dates and stays awaiting the date", async () => {
       const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("31/04/2026"));
 
-      expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_REPORT_DATE");
+      expect(store.states.get(CHAT_ID)?.stepKey).toBe("AWAITING_DIARIO_OBRA_DATE");
       expect(messaging.messages.at(-1)?.text).toContain("Não entendi essa data");
     });
 
-    it("sends text only when no records found and resets to main menu", async () => {
-      const { service, store, messaging, pdfGenerator } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    it("sends text only when no records found and returns to main menu keeping the obra", async () => {
+      const { service, store, messaging } = createHarness();
+      store.obrasForReport = [OBRA_FOR_REPORT];
       store.reportEntradas = [];
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("22/06/2026"));
 
-      expect(store.states.has(CHAT_ID)).toBe(false);
-      expect(pdfGenerator.calls).toHaveLength(0);
       expect(messaging.files).toHaveLength(0);
-      const lastMsg = messaging.messages.at(-1)?.text ?? "";
-      expect(lastMsg).toContain("Nenhum registro encontrado");
-      expect(lastMsg).toContain("7) Gerar diario de obra");
+      const allTexts = messaging.messages.map((m) => m.text);
+      expect(allTexts.some((t) => t.includes("Nenhum registro encontrado em 22/06/2026"))).toBe(true);
+      expect(store.states.get(CHAT_ID)).toMatchObject({ step: "MAIN_MENU", selectedObraId: 1 });
+      expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
-    it("generates and sends a PDF when records are found, then resets to main menu", async () => {
+    it("sends the same daily PDF as the panel (generateDailyReport) when records are found", async () => {
       const { service, store, messaging, pdfGenerator } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+      store.obrasForReport = [OBRA_FOR_REPORT];
       store.reportEntradas = [
         {
           id: 1n,
-          description: "Parede concretada",
+          description: "Parede concretada (PS-045)",
           createdAt: new Date("2026-06-22T10:00:00Z"),
           tipo: "Inspecao de servico",
           tipoServico: "Concretagem",
-          numeroProcedimento: "PROC-45/2026",
-          empresaNome: "Obra Centro",
+          numeroProcedimento: null,
+          empresaNome: "AND Construções",
           usuarioNome: "Joao",
           mediaUrls: []
         }
@@ -1334,29 +1418,27 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("7"));
       await service.handleWebhook(textWebhook("22/06/2026"));
 
-      expect(pdfGenerator.calls).toHaveLength(1);
-      expect(pdfGenerator.calls[0]).toMatchObject({
-        categoria: "Inspecao de servico",
-        empresaNome: "Obra Centro",
-        reportDate: "22/06/2026",
-        entradas: [
-          expect.objectContaining({
-            tipoServico: "Concretagem",
-            numeroProcedimento: "PROC-45/2026"
-          })
-        ]
+      // Gera pelo layout do diário (não pelo relatório de consulta antigo).
+      expect(pdfGenerator.calls).toHaveLength(0);
+      expect(pdfGenerator.dailyCalls).toHaveLength(1);
+      expect(pdfGenerator.dailyCalls[0]).toMatchObject({
+        obraNome: "Obra Residencial Aurora",
+        obraCodigo: "130",
+        construtoraNome: "Construtora Tanen",
+        reportDate: "2026-06-22",
+        entradas: [expect.objectContaining({ empresaNome: "AND Construções" })]
       });
       expect(messaging.files).toHaveLength(1);
       expect(messaging.files[0].file.mimetype).toBe("application/pdf");
-      expect(messaging.files[0].file.filename).toMatch(/\.pdf$/);
+      expect(messaging.files[0].file.filename).toBe("diario-obra-1-2026-06-22.pdf");
       expect(messaging.files[0].file.data).toBeTruthy();
-      expect(store.states.has(CHAT_ID)).toBe(false);
+      expect(store.states.get(CHAT_ID)).toMatchObject({ step: "MAIN_MENU", selectedObraId: 1 });
       expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
-    it("sends 'Gerando relatorio' before fetching entries", async () => {
+    it("sends 'Gerando o diario' before generating", async () => {
       const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+      store.obrasForReport = [OBRA_FOR_REPORT];
       store.reportEntradas = [];
 
       await service.handleWebhook(textWebhook("oi"));
@@ -1364,16 +1446,22 @@ describe("ConversationService", () => {
       await service.handleWebhook(textWebhook("22/06/2026"));
 
       const allTexts = messaging.messages.map((m) => m.text);
-      const generandoIdx = allTexts.findIndex((t) => t.includes("Gerando o relatorio"));
-      expect(generandoIdx).toBeGreaterThanOrEqual(0);
+      expect(allTexts.some((t) => t.includes("Gerando o diario"))).toBe(true);
     });
 
-    it("reset commands work from SELECT_EMPRESA_FOR_REPORT state", async () => {
+    it("works even when the user has no empresa vinculada", async () => {
       const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [
-        { id: 10n, nome: "Obra Centro" },
-        { id: 20n, nome: "Obra Sul" }
-      ]);
+      store.empresasByUser.set(7, []);
+
+      await service.handleWebhook(textWebhook("oi"));
+      await service.handleWebhook(textWebhook("7"));
+
+      expect(store.states.get(CHAT_ID)?.stepKey).toBe("AWAITING_DIARIO_OBRA_DATE");
+      expect(messaging.messages.at(-1)?.text).toContain("DD/MM/AAAA");
+    });
+
+    it("reset commands work from the diario date state", async () => {
+      const { service, store, messaging } = createHarness();
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
@@ -1383,9 +1471,8 @@ describe("ConversationService", () => {
       expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
     });
 
-    it("reset commands work from AWAITING_REPORT_DATE state", async () => {
+    it("reset command '0' works from the diario date state", async () => {
       const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
       await service.handleWebhook(textWebhook("oi"));
       await service.handleWebhook(textWebhook("7"));
@@ -1393,17 +1480,6 @@ describe("ConversationService", () => {
 
       expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
       expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
-    });
-
-    it("rejects consulta when user has no empresa", async () => {
-      const { service, store, messaging } = createHarness();
-      store.empresasByUser.set(7, []);
-
-      await service.handleWebhook(textWebhook("oi"));
-      await service.handleWebhook(textWebhook("7"));
-
-      expect(store.states.has(CHAT_ID)).toBe(false);
-      expect(messaging.messages.at(-1)?.text).toContain("nao tem empresa vinculada");
     });
   });
 
@@ -1435,6 +1511,17 @@ describe("ConversationService", () => {
 
   it("keeps the session when the last message was under 1 hour ago", async () => {
     const { service, store } = createHarness();
+    // Entrada já criada, aguardando o procedimento no passo de fallback.
+    store.entradas.push({
+      id: 1n,
+      userId: 7,
+      empresaId: 10n,
+      obraId: 1,
+      tipo: "Inspecao de servico",
+      tipoServico: "Alvenaria",
+      numeroProcedimento: null,
+      description: "Parede norte concretada"
+    });
     store.states.set(CHAT_ID, {
       chatId: CHAT_ID,
       phoneE164: PHONE,
@@ -1445,15 +1532,15 @@ describe("ConversationService", () => {
       selectedTipo: "Inspecao de servico",
       selectedEmpresaId: 10n,
       selectedTipoServico: "Alvenaria",
+      pendingEntradaId: 1n,
       updatedAt: new Date(Date.now() - 59 * 60 * 1000)
     });
 
-    await service.handleWebhook(textWebhook("PROC-45/2026"));
+    await service.handleWebhook(textWebhook("PS-045"));
 
-    expect(store.states.get(CHAT_ID)).toMatchObject({
-      step: "AWAITING_PHOTO",
-      selectedNumeroProcedimento: "PROC-45/2026"
-    });
+    // Sessão mantida: o procedimento foi gravado e o registro concluído.
+    expect(store.entradas[0]).toMatchObject({ numeroProcedimento: "PS-045" });
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
   });
 
   it("serializes concurrent messages for the same chatId", async () => {

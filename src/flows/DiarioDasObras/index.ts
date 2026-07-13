@@ -11,12 +11,17 @@ import type {
 } from "../types";
 import {
   isTipoServico,
-  numeroProcedimentoPromptText,
+  numeroProcedimentoFaltandoText,
   photoPromptText,
   tipoServicoMenuText,
   TIPO_SERVICO_OPTIONS
 } from "./categoriaEntrada";
-import { DIARIO_OBRA_REPORT_OPTION, DIARIO_OBRA_REPORT_TIPO } from "./gerarDiarioObra";
+import {
+  DIARIO_OBRA_FLOW_STEPS,
+  DIARIO_OBRA_REPORT_OPTION,
+  diarioObraDatePromptText,
+  isDiarioObraFlowStepKey
+} from "./gerarDiarioObra";
 import { usesIncludeOnlyActionMenu } from "./inspecaoServico";
 import {
   ACTION_OPTIONS,
@@ -113,10 +118,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         await this.handleEmpresaSelection(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case "AWAITING_SERVICE_TYPE":
-        await this.handleServiceType(input.chatId, input.phoneE164, state, input.text);
+        await this.handleServiceType(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case "AWAITING_PROCEDURE_NUMBER":
-        await this.handleProcedureNumber(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        await this.handleProcedureNumber(input.chatId, input.phoneE164, state, input.text);
         return;
       case "AWAITING_PHOTO":
         await this.handlePhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
@@ -150,6 +155,9 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         return;
       case "AWAITING_REPORT_DATE":
         await this.handleReportDate(input.chatId, input.phoneE164, state, input.text);
+        return;
+      case DIARIO_OBRA_FLOW_STEPS.awaitingDate:
+        await this.handleDiarioObraDate(input.chatId, input.phoneE164, state, input.text);
         return;
       case "SELECT_EMPRESA_FOR_TRAINING":
         await this.handleEmpresaSelectionForTraining(input.chatId, input.phoneE164, input.user.id, state, input.text);
@@ -288,7 +296,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     if (text === DIARIO_OBRA_REPORT_OPTION) {
-      await this.handleConsultaForTipo(chatId, phoneE164, userId, state, DIARIO_OBRA_REPORT_TIPO);
+      await this.startDiarioObraReport(chatId, phoneE164, state, obraId, obraNome);
       return;
     }
 
@@ -799,6 +807,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
   private async handleServiceType(
     chatId: string,
     phoneE164: string,
+    userId: number,
     state: ConversationStateRecord,
     text: string
   ): Promise<void> {
@@ -814,54 +823,61 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.saveState({
-      ...state,
-      chatId,
-      phoneE164,
-      step: "AWAITING_PROCEDURE_NUMBER",
-      selectedTipoServico: tipoServico,
-      selectedNumeroProcedimento: null,
-      pendingEntradaId: null
-    });
-
-    await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoPromptText());
-  }
-
-  private async handleProcedureNumber(
-    chatId: string,
-    phoneE164: string,
-    userId: number,
-    state: ConversationStateRecord,
-    text: string
-  ): Promise<void> {
-    const tipo = this.requireSelectedTipo(state);
-    const tipoServico = this.requireSelectedTipoServico(state);
-    if (!tipo || !state.selectedEmpresaId || !tipoServico || !state.selectedObraId || !state.selectedObraNome) {
-      await this.resetToMenu(chatId, phoneE164);
-      return;
-    }
-
-    const numeroProcedimento = text.trim();
-    if (!numeroProcedimento) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoPromptText());
-      return;
-    }
-
     const empresa = await this.findSelectedEmpresaForUser(userId, state.selectedEmpresaId);
     await this.saveState({
       ...state,
       chatId,
       phoneE164,
       step: "AWAITING_PHOTO",
-      selectedNumeroProcedimento: numeroProcedimento,
+      selectedTipoServico: tipoServico,
+      selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
 
-    await this.sendWithHeader(
+    // O número do procedimento é detectado automaticamente na descrição da
+    // foto; só perguntamos depois se não aparecer nenhum código.
+    await this.sendWithHeader(chatId, state.selectedObraNome, photoPromptText(tipo, empresa, tipoServico));
+  }
+
+  /**
+   * Passo de fallback: só é alcançado quando a descrição da foto não trouxe o
+   * código do procedimento. A entrada e a foto já existem (pendingEntradaId);
+   * aqui gravamos o número informado e concluímos o registro.
+   */
+  private async handleProcedureNumber(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const tipo = this.requireSelectedTipo(state);
+    const tipoServico = this.requireSelectedTipoServico(state);
+    if (
+      !tipo ||
+      !state.selectedEmpresaId ||
+      !tipoServico ||
+      !state.selectedObraId ||
+      !state.selectedObraNome ||
+      !state.pendingEntradaId
+    ) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const numeroProcedimento = text.trim();
+    if (!numeroProcedimento) {
+      await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoFaltandoText());
+      return;
+    }
+
+    await this.deps.store.updateEntradaProcedureNumber(state.pendingEntradaId, numeroProcedimento);
+
+    await this.finalizeEntradaDescription({
       chatId,
-      state.selectedObraNome,
-      photoPromptText(tipo, empresa, tipoServico, numeroProcedimento)
-    );
+      phoneE164,
+      state,
+      entradaId: state.pendingEntradaId
+    });
   }
 
   private async handlePhoto(
@@ -873,15 +889,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
     const tipoServico = this.requireSelectedTipoServico(state);
-    const numeroProcedimento = state.selectedNumeroProcedimento?.trim();
-    if (
-      !tipo ||
-      !state.selectedEmpresaId ||
-      !tipoServico ||
-      !numeroProcedimento ||
-      !state.selectedObraId ||
-      !state.selectedObraNome
-    ) {
+    if (!tipo || !state.selectedEmpresaId || !tipoServico || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -921,7 +929,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         obraId: state.selectedObraId,
         tipo,
         tipoServico,
-        numeroProcedimento,
+        numeroProcedimento: null,
         description: ""
       });
 
@@ -932,8 +940,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
       const caption = (payload.body ?? "").trim();
       if (caption) {
-        // Usuario mandou a descricao junto da imagem (legenda). Aproveita e conclui.
-        await this.finalizeEntradaDescription({
+        // Usuario mandou a descricao junto da imagem (legenda). Aproveita e trata.
+        await this.processEntradaDescription({
           chatId,
           phoneE164,
           state,
@@ -975,7 +983,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.finalizeEntradaDescription({
+    await this.processEntradaDescription({
       chatId,
       phoneE164: state.phoneE164,
       state,
@@ -984,8 +992,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     });
   }
 
-  /** Salva a descricao da entrada e leva o usuario ao menu pos-registro. */
-  private async finalizeEntradaDescription(input: {
+  /**
+   * Salva a descricao da entrada e decide o proximo passo: se a descricao
+   * trouxe o codigo do procedimento (ex: PS-031), conclui; senao, pede o
+   * numero do procedimento no passo de fallback.
+   */
+  private async processEntradaDescription(input: {
     chatId: string;
     phoneE164: string;
     state: ConversationStateRecord;
@@ -996,6 +1008,41 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     const { chatId, phoneE164, state, entradaId, description, confirmationText } = input;
 
     await this.deps.store.updateEntradaDescription(entradaId, description);
+
+    const temProcedimento = await this.deps.store.hasProcedureCode({
+      obraId: state.selectedObraId,
+      text: description
+    });
+
+    if (temProcedimento) {
+      await this.finalizeEntradaDescription({ chatId, phoneE164, state, entradaId, confirmationText });
+      return;
+    }
+
+    // Faltou o numero do procedimento na descricao: guarda a entrada e pergunta.
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_PROCEDURE_NUMBER",
+      pendingEntradaId: entradaId
+    });
+
+    if (confirmationText) {
+      await this.sendWithHeader(chatId, state.selectedObraNome ?? null, confirmationText);
+    }
+    await this.sendWithHeader(chatId, state.selectedObraNome ?? null, numeroProcedimentoFaltandoText());
+  }
+
+  /** Conclui o registro (descricao ja salva) e leva o usuario ao menu pos-registro. */
+  private async finalizeEntradaDescription(input: {
+    chatId: string;
+    phoneE164: string;
+    state: ConversationStateRecord;
+    entradaId: bigint;
+    confirmationText?: string;
+  }): Promise<void> {
+    const { chatId, phoneE164, state, confirmationText } = input;
 
     if (!state.selectedObraId || !state.selectedObraNome) {
       await this.deps.store.clearState(chatId);
@@ -1324,6 +1371,75 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     await this.handleConsultaForTipo(chatId, phoneE164, userId, state, tipo);
   }
 
+  /**
+   * Menu 7 ("Gerar diario de obra"): pergunta só a data — sem escolher
+   * empresa, o diário cobre todos os registros da obra no dia — e gera o
+   * mesmo PDF do painel (/relatorios) via DailyReportGenerator.
+   */
+  private async startDiarioObraReport(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    obraId: number,
+    obraNome: string
+  ): Promise<void> {
+    await this.saveState({
+      ...state,
+      chatId,
+      phoneE164,
+      step: "AWAITING_REPORT_DATE",
+      stepKey: DIARIO_OBRA_FLOW_STEPS.awaitingDate,
+      selectedTipo: null,
+      selectedEmpresaId: null,
+      selectedObraId: obraId,
+      selectedObraNome: obraNome,
+      pendingEntradaId: null
+    });
+    await this.sendWithHeader(chatId, obraNome, diarioObraDatePromptText());
+  }
+
+  private async handleDiarioObraDate(
+    chatId: string,
+    phoneE164: string,
+    state: ConversationStateRecord,
+    text: string
+  ): Promise<void> {
+    const obraId = state.selectedObraId;
+    const obraNome = state.selectedObraNome;
+    if (!obraId || !obraNome) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    const isoDate = parseBrDateToIso(text);
+    if (!isoDate) {
+      await this.sendWithHeader(chatId, obraNome, "⚠️ Não entendi essa data. Use o formato DD/MM/AAAA.");
+      return;
+    }
+
+    await this.sendWithHeader(chatId, obraNome, "📄 Gerando o diario, so um instante...");
+
+    const result = await this.deps.dailyReport.generateForObraDay({ obraId, date: isoDate });
+    if (!result) {
+      await this.resetToMenu(chatId, phoneE164);
+      return;
+    }
+
+    if (result.totalEntradas === 0) {
+      await this.sendWithHeader(chatId, obraNome, `📄 Nenhum registro encontrado em ${text}.`);
+      await this.goToMainMenu(chatId, phoneE164, obraId, obraNome);
+      return;
+    }
+
+    await this.deps.messaging.sendFile(chatId, {
+      mimetype: "application/pdf",
+      filename: `diario-obra-${obraId}-${isoDate}.pdf`,
+      data: result.buffer.toString("base64")
+    });
+
+    await this.goToMainMenu(chatId, phoneE164, obraId, obraNome);
+  }
+
   private async handleConsultaForTipo(
     chatId: string,
     phoneE164: string,
@@ -1460,7 +1576,9 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
   private async saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord> {
     const stepKey =
-      isMaterialFlowStepKey(input.stepKey) || isObraFlowStepKey(input.stepKey) ? input.stepKey : input.step;
+      isMaterialFlowStepKey(input.stepKey) || isObraFlowStepKey(input.stepKey) || isDiarioObraFlowStepKey(input.stepKey)
+        ? input.stepKey
+        : input.step;
 
     return this.deps.store.saveState({
       ...input,
@@ -1590,6 +1708,18 @@ function dateFromData(value: unknown): Date | null {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** "09/07/2026" → "2026-07-09" (valida com as mesmas regras de parseReportDate). */
+function parseBrDateToIso(text: string): string | null {
+  if (!parseReportDate(text)) {
+    return null;
+  }
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) {
+    return null;
+  }
+  return `${match[3]}-${match[2]}-${match[1]}`;
 }
 
 function parseReportDate(text: string): { start: Date; end: Date } | null {

@@ -112,6 +112,10 @@ export interface ReportInput {
 export interface ObraForReport {
   id: number;
   nome: string;
+  /** Código da obra (ex: "130"), exibido no cabeçalho do diário. */
+  codigo?: string | null;
+  /** Nome da construtora dona da obra (Company.name), exibido no cabeçalho. */
+  construtoraNome?: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
   status: string;
@@ -125,9 +129,18 @@ export interface ConversationStore {
   saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord>;
   clearState(chatId: string): Promise<void>;
   createEntrada(input: CreateEntradaInput): Promise<{ id: bigint }>;
+  /**
+   * Verifica de forma determinística se o texto (descrição/legenda) contém ao
+   * menos um código de procedimento — um código cujo prefixo classifica como
+   * STANDARD no setor da obra. Não exige que a norma exista cadastrada; serve
+   * apenas para decidir se o usuário informou (ou não) o procedimento.
+   */
+  hasProcedureCode(input: { obraId?: number | null; text: string }): Promise<boolean>;
   createTreinamento(input: CreateTreinamentoInput): Promise<{ entradaId: bigint; treinamentoId: number }>;
   addEntradaMedia(input: { entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }): Promise<void>;
   updateEntradaDescription(entradaId: bigint, description: string): Promise<void>;
+  /** Grava o número do procedimento (campo dedicado) e reprocessa as menções. */
+  updateEntradaProcedureNumber(entradaId: bigint, numeroProcedimento: string): Promise<void>;
   findEntradasForReport(input: {
     empresaId: bigint;
     obraId?: number | null;
@@ -158,8 +171,36 @@ export interface ObjectStorage {
   downloadPrivateObject(path: string): Promise<Buffer>;
 }
 
+/**
+ * Entrada do "Diário de Obra" diário no formato do formulário manual
+ * (F-06-03): cabeçalho com construtora/empreendimento, tabela de atividades
+ * por empresa e grade de fotos numeradas.
+ */
+export interface DailyReportInput {
+  obraNome: string;
+  obraCodigo?: string | null;
+  construtoraNome?: string | null;
+  /** Data do diário em ISO (YYYY-MM-DD). */
+  reportDate: string;
+  generatedAt: Date;
+  entradas: EntradaForReport[];
+}
+
 export interface PdfGenerator {
   generateReport(input: ReportInput): Promise<Buffer>;
+  generateDailyReport(input: DailyReportInput): Promise<Buffer>;
+}
+
+/**
+ * Gerador do "Diário do Dia" (mesmo usado pelo painel em /relatorios e pelo
+ * job automático). O fluxo do WhatsApp (menu "Gerar diario de obra") delega
+ * aqui para que todos os canais produzam o mesmo PDF.
+ */
+export interface DailyReportGenerator {
+  generateForObraDay(input: {
+    obraId: number;
+    date: string;
+  }): Promise<{ buffer: Buffer; totalEntradas: number } | null>;
 }
 
 export interface ConversationServiceDeps {
@@ -168,6 +209,7 @@ export interface ConversationServiceDeps {
   mediaDownloader: MediaDownloader;
   objectStorage: ObjectStorage;
   pdfGenerator: PdfGenerator;
+  dailyReport: DailyReportGenerator;
 }
 
 export interface FlowHandleInput {

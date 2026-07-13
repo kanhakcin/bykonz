@@ -1,6 +1,7 @@
-import { DIARIO_OBRA_REPORT_TIPO } from "./gerarDiarioObra";
 import type { EntryTipo } from "./types";
 
+// Inspecao de servico não tem consulta própria no menu de ação: o relatório
+// consolidado sai pelo "Gerar diario de obra" (menu 7).
 export function usesIncludeOnlyActionMenu(tipo: EntryTipo): boolean {
-  return tipo === DIARIO_OBRA_REPORT_TIPO;
+  return tipo === "Inspecao de servico";
 }

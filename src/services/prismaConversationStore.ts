@@ -204,6 +204,17 @@ export class PrismaConversationStore implements ConversationStore {
     await this.identifyMentions(entry.id, entry.sectorId, scanText);
   }
 
+  async updateEntradaProcedureNumber(entradaId: bigint, numeroProcedimento: string): Promise<void> {
+    const entry = await this.prisma.entry.update({
+      where: { id: entradaId },
+      data: { procedureNumber: numeroProcedimento },
+      select: { id: true, sectorId: true, description: true }
+    });
+
+    const scanText = [numeroProcedimento, entry.description].filter(Boolean).join(" ");
+    await this.identifyMentions(entry.id, entry.sectorId, scanText);
+  }
+
   async findEntradasForReport(input: {
     empresaId: bigint;
     obraId?: number | null;
@@ -283,7 +294,10 @@ export class PrismaConversationStore implements ConversationStore {
   }
 
   async findObraById(obraId: number): Promise<ObraForReport | null> {
-    const project = await this.prisma.project.findUnique({ where: { id: obraId } });
+    const project = await this.prisma.project.findUnique({
+      where: { id: obraId },
+      include: { company: { select: { name: true } } }
+    });
     if (!project) {
       return null;
     }
@@ -291,6 +305,8 @@ export class PrismaConversationStore implements ConversationStore {
     return {
       id: project.id,
       nome: project.name,
+      codigo: project.code,
+      construtoraNome: project.company?.name ?? null,
       whatsappGroupId: project.whatsappGroupId,
       whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
       status: project.status
@@ -317,11 +333,8 @@ export class PrismaConversationStore implements ConversationStore {
    * grava EntryMention + Alert conforme docs/arquitetura-dados-nova-versao-v1.md §5-6.
    * Idempotente por (entryId, code): reprocessar a mesma entrada não duplica.
    */
-  private async identifyMentions(entryId: bigint, sectorId: number | null, text: string): Promise<void> {
-    if (!text.trim()) {
-      return;
-    }
-
+  /** Mapa de prefixos visível ao setor (global + específico; específico vence). */
+  private async loadPrefixMap(sectorId: number | null): Promise<Map<string, { entityType: ParsedEntityType }>> {
     const prefixRows = await this.prisma.codePrefix.findMany({
       where: { OR: [{ sectorId: null }, { sectorId: sectorId ?? undefined }] }
     });
@@ -330,6 +343,31 @@ export class PrismaConversationStore implements ConversationStore {
     for (const row of prefixRows.sort((a, b) => (a.sectorId == null ? -1 : 1) - (b.sectorId == null ? -1 : 1))) {
       prefixMap.set(row.prefix.toUpperCase(), { entityType: row.entityType as ParsedEntityType });
     }
+    return prefixMap;
+  }
+
+  async hasProcedureCode(input: { obraId?: number | null; text: string }): Promise<boolean> {
+    if (!input.text.trim()) {
+      return false;
+    }
+
+    const sectorId =
+      input.obraId != null
+        ? (await this.prisma.project.findUnique({ where: { id: input.obraId }, select: { sectorId: true } }))
+            ?.sectorId ?? null
+        : null;
+
+    const prefixMap = await this.loadPrefixMap(sectorId);
+    const mentions = extractCodeMentions(input.text, prefixMap);
+    return mentions.some((m) => m.entityType === "STANDARD");
+  }
+
+  private async identifyMentions(entryId: bigint, sectorId: number | null, text: string): Promise<void> {
+    if (!text.trim()) {
+      return;
+    }
+
+    const prefixMap = await this.loadPrefixMap(sectorId);
 
     const mentions = extractCodeMentions(text, prefixMap);
     if (mentions.length === 0) {

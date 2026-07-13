@@ -13,13 +13,20 @@ import type { DailyReportJobDeps } from "./jobs/dailyReportJob";
 export function createConversationService(config: AppConfig): ConversationService {
   const wahaClient = WahaClient.fromConfig(config);
   const objectStorage = S3ObjectStorage.fromConfig(config);
+  const store = new PrismaConversationStore(prisma);
+  const pdfGenerator = new PdfReportGenerator(objectStorage);
 
   return new ConversationService({
-    store: new PrismaConversationStore(prisma),
+    store,
     messaging: wahaClient,
     mediaDownloader: wahaClient,
     objectStorage,
-    pdfGenerator: new PdfReportGenerator(objectStorage)
+    pdfGenerator,
+    // Mesmo gerador do painel: o menu "Gerar diario de obra" envia o PDF
+    // idêntico ao baixado em /relatorios.
+    dailyReport: new DailyReportService(store, pdfGenerator, {
+      timezoneOffset: config.panelTimezoneOffset
+    })
   });
 }
 

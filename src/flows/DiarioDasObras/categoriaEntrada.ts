@@ -32,17 +32,13 @@ export function tipoServicoMenuText(tipo: EntryTipo): string {
   return `🔧 ${tipo}\nQual o tipo de serviço?\n\n${options}\n\nDigite o numero.`;
 }
 
-export function numeroProcedimentoPromptText(): string {
-  return "📝 Qual o número do procedimento utilizado?\nEx: PS-031";
+/** Pedido de fallback: usado só quando a descrição não trouxe o código do procedimento. */
+export function numeroProcedimentoFaltandoText(): string {
+  return "📝 Faltou você informar o número do procedimento. Qual foi o utilizado?\nEx: PS-031";
 }
 
-export function photoPromptText(
-  tipo: EntryTipo,
-  empresa: EmpresaRecord,
-  tipoServico: TipoServico,
-  numeroProcedimento: string
-): string {
+export function photoPromptText(tipo: EntryTipo, empresa: EmpresaRecord, tipoServico: TipoServico): string {
   const empresaNome = empresa.nome ?? `Empresa ${empresa.id.toString()}`;
-  return `🔧 ${tipo} - ${empresaNome}\nServiço: ${tipoServico}\nProcedimento: ${numeroProcedimento}\n\n📸 Agora envie uma foto pra continuar.`;
+  return `🔧 ${tipo} - ${empresaNome}\nServiço: ${tipoServico}\n\n📸 Agora envie uma foto pra continuar. Descreva o serviço e informe o número do procedimento (ex: PS-031).`;
 }
 

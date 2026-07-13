@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DailyReportService, InvalidReportDateError } from "../src/services/dailyReportService";
-import type { ConversationStore, EntradaForReport, ObraForReport, PdfGenerator, ReportInput } from "../src/services/conversationService";
+import type {
+  ConversationStore,
+  DailyReportInput,
+  EntradaForReport,
+  ObraForReport,
+  PdfGenerator
+} from "../src/services/conversationService";
 
 function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStore {
   return {
@@ -14,6 +20,8 @@ function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStor
     createTreinamento: async () => ({ entradaId: 1n, treinamentoId: 1 }),
     addEntradaMedia: async () => {},
     updateEntradaDescription: async () => {},
+    updateEntradaProcedureNumber: async () => {},
+    hasProcedureCode: async () => true,
     findEntradasForReport: async () => [],
     findEntradasForObraDay: async () => [],
     findObraById: async () => null,
@@ -24,13 +32,16 @@ function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStor
 
 function makePdfGenerator(): PdfGenerator {
   return {
-    generateReport: async () => Buffer.from("%PDF-fake")
+    generateReport: async () => Buffer.from("%PDF-fake"),
+    generateDailyReport: async () => Buffer.from("%PDF-fake")
   };
 }
 
 const OBRA: ObraForReport = {
   id: 1,
   nome: "Obra Residencial Aurora",
+  codigo: "130",
+  construtoraNome: "Construtora Tanen",
   whatsappGroupId: "1203630xxxxx@g.us",
   whatsappAutoReportEnabled: true,
   status: "ACTIVE"
@@ -90,9 +101,10 @@ describe("DailyReportService", () => {
       }
     ];
 
-    let receivedInput: ReportInput | undefined;
+    let receivedInput: DailyReportInput | undefined;
     const pdfGenerator: PdfGenerator = {
-      generateReport: async (input) => {
+      generateReport: async () => Buffer.from("%PDF-fake"),
+      generateDailyReport: async (input) => {
         receivedInput = input;
         return Buffer.from("%PDF-fake");
       }
@@ -108,6 +120,8 @@ describe("DailyReportService", () => {
     expect(result?.totalEntradas).toBe(2);
     expect(receivedInput?.entradas).toHaveLength(2);
     expect(receivedInput?.obraNome).toBe(OBRA.nome);
-    expect(receivedInput?.empresaNome).toBeUndefined();
+    expect(receivedInput?.obraCodigo).toBe("130");
+    expect(receivedInput?.construtoraNome).toBe("Construtora Tanen");
+    expect(receivedInput?.reportDate).toBe("2026-06-22");
   });
 });

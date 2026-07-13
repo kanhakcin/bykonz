@@ -41,19 +41,15 @@ export class DailyReportService {
 
     const entradas = await this.store.findEntradasForObraDay({ obraId: obra.id, dateStart: start, dateEnd: end });
 
-    const buffer = await this.pdfGenerator.generateReport({
-      categoria: "Diario de Obra",
+    const buffer = await this.pdfGenerator.generateDailyReport({
       obraNome: obra.nome,
-      reportDate: formatBR(input.date),
+      obraCodigo: obra.codigo ?? null,
+      construtoraNome: obra.construtoraNome ?? null,
+      reportDate: input.date,
       generatedAt: new Date(),
       entradas
     });
 
     return { buffer, totalEntradas: entradas.length };
   }
-}
-
-function formatBR(isoDate: string): string {
-  const [year, month, day] = isoDate.split("-");
-  return `${day}/${month}/${year}`;
 }

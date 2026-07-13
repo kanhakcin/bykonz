@@ -15,6 +15,8 @@ import {
   PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
+  DuplicateWhatsappUserPhoneError,
+  WhatsappUserHasEntriesError,
   type AlertRecord,
   type AssetInput,
   type AssetListInput,
@@ -43,7 +45,10 @@ import {
   type StandardInput,
   type StandardListInput,
   type StandardListResult,
-  type StandardRecord
+  type StandardRecord,
+  type CompanyRef,
+  type WhatsappUserListItem,
+  type WhatsappUserListResult
 } from "../src/services/panelService";
 import { InvalidReportDateError } from "../src/services/dailyReportService";
 
@@ -88,12 +93,29 @@ class FakePanelStore implements PanelStore {
   assets: CodeRef[] = [];
   panelUsers: PanelUserRecord[] = [];
   private nextPanelUserId = 1;
+  whatsappUsers: WhatsappUserListItem[] = [];
+  whatsappUsersWithEntries = new Set<number>();
+  companies: CompanyRef[] = [{ id: "10", name: "Construtora Tanen" }, { id: "20", name: "AND Construções" }];
+  private nextWhatsappUserId = 1;
 
   constructor() {
     this.reset();
   }
 
   reset(): void {
+    this.nextWhatsappUserId = 1;
+    this.whatsappUsersWithEntries = new Set([1]);
+    this.whatsappUsers = [
+      {
+        id: this.nextWhatsappUserId++,
+        name: "Roberto Costa",
+        phoneE164: "+5547999990000",
+        role: "Engenheiro",
+        active: true,
+        companies: [{ id: "10", name: "Construtora Tanen" }]
+      }
+    ];
+
     this.nextPanelUserId = 1;
     this.panelUsers = [
       {
@@ -638,6 +660,85 @@ class FakePanelStore implements PanelStore {
   private assertUniquePanelUserEmail(email: string, exceptId?: number): void {
     if (this.panelUsers.some((u) => u.email === email && u.id !== exceptId)) {
       throw new DuplicatePanelUserEmailError(email);
+    }
+  }
+
+  async listWhatsappUsers(input: PanelUserListInput): Promise<WhatsappUserListResult> {
+    const search = input.search?.toLowerCase();
+    const filtered = this.whatsappUsers
+      .filter((u) => !search || (u.name ?? "").toLowerCase().includes(search) || u.phoneE164.includes(search))
+      .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async findWhatsappUserById(id: number): Promise<WhatsappUserListItem | null> {
+    return this.whatsappUsers.find((u) => u.id === id) ?? null;
+  }
+
+  async createWhatsappUser(input: {
+    phoneE164: string;
+    name: string;
+    role: string | null;
+    active: boolean;
+    companyIds: bigint[];
+  }): Promise<WhatsappUserListItem> {
+    this.assertUniqueWhatsappPhone(input.phoneE164);
+    const user: WhatsappUserListItem = {
+      id: this.nextWhatsappUserId++,
+      name: input.name,
+      phoneE164: input.phoneE164,
+      role: input.role,
+      active: input.active,
+      companies: this.companiesByIds(input.companyIds)
+    };
+    this.whatsappUsers.push(user);
+    return user;
+  }
+
+  async updateWhatsappUser(
+    id: number,
+    input: { phoneE164: string; name: string; role: string | null; active: boolean; companyIds: bigint[] }
+  ): Promise<WhatsappUserListItem | null> {
+    const user = this.whatsappUsers.find((u) => u.id === id);
+    if (!user) {
+      return null;
+    }
+    this.assertUniqueWhatsappPhone(input.phoneE164, id);
+    user.phoneE164 = input.phoneE164;
+    user.name = input.name;
+    user.role = input.role;
+    user.active = input.active;
+    user.companies = this.companiesByIds(input.companyIds);
+    return user;
+  }
+
+  async deleteWhatsappUser(id: number): Promise<boolean> {
+    if (this.whatsappUsersWithEntries.has(id)) {
+      throw new WhatsappUserHasEntriesError(id);
+    }
+    const index = this.whatsappUsers.findIndex((u) => u.id === id);
+    if (index < 0) {
+      return false;
+    }
+    this.whatsappUsers.splice(index, 1);
+    return true;
+  }
+
+  async listCompanies(): Promise<CompanyRef[]> {
+    return this.companies;
+  }
+
+  private companiesByIds(ids: bigint[]): CompanyRef[] {
+    return this.companies.filter((c) => ids.some((id) => id.toString() === c.id));
+  }
+
+  private assertUniqueWhatsappPhone(phoneE164: string, exceptId?: number): void {
+    if (this.whatsappUsers.some((u) => u.phoneE164 === phoneE164 && u.id !== exceptId)) {
+      throw new DuplicateWhatsappUserPhoneError(phoneE164);
     }
   }
 }
@@ -1784,5 +1885,152 @@ describe("panel users CRUD", () => {
 
     const res = await request(app).get("/api/v1/users").set("Authorization", `Bearer ${managerToken}`);
     expect(res.status).toBe(403);
+  });
+});
+
+describe("whatsapp users CRUD", () => {
+  it("lists whatsapp users with companies and total count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/whatsapp-users").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.data[0]).toMatchObject({
+      name: "Roberto Costa",
+      phoneE164: "+5547999990000",
+      active: true,
+      companies: [{ id: "10", name: "Construtora Tanen" }]
+    });
+  });
+
+  it("creates a whatsapp user normalizing the phone to E.164 with DDI 55", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/whatsapp-users")
+      .set(auth)
+      .send({ name: "Novo Engenheiro", phone: "(47) 98888-7777", role: "Engenheiro", active: true, companyIds: ["20"] });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      name: "Novo Engenheiro",
+      phoneE164: "+5547988887777",
+      active: true,
+      companies: [{ id: "20", name: "AND Construções" }]
+    });
+  });
+
+  it("accepts a phone that already includes the DDI", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/whatsapp-users")
+      .set(auth)
+      .send({ name: "Com DDI", phone: "+55 47 97777-6666", active: true, companyIds: [] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.phoneE164).toBe("+5547977776666");
+  });
+
+  it("rejects an invalid phone with an i18n code", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/whatsapp-users")
+      .set(auth)
+      .send({ name: "Telefone Ruim", phone: "1234", active: true, companyIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "invalid_phone", code: "whatsappUser.invalidPhone" });
+  });
+
+  it("returns 409 with an i18n code for a duplicated phone", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/whatsapp-users")
+      .set(auth)
+      .send({ name: "Duplicado", phone: "47 99999-0000", active: true, companyIds: [] });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "duplicate_phone", code: "whatsappUser.duplicated" });
+  });
+
+  it("rejects invalid payloads", async () => {
+    const app = buildApp();
+    for (const payload of [
+      {},
+      { name: "Sem telefone", companyIds: [] },
+      { name: "", phone: "47999990001", companyIds: [] },
+      { name: "X", phone: "47999990001", companyIds: "10" },
+      { name: "X", phone: "47999990001", companyIds: ["abc"] }
+    ]) {
+      const res = await request(app).post("/api/v1/whatsapp-users").set(auth).send(payload);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_payload");
+    }
+  });
+
+  it("updates a whatsapp user replacing the linked companies", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/whatsapp-users/1")
+      .set(auth)
+      .send({ name: "Roberto C. Silva", phone: "47 99999-0000", role: null, active: false, companyIds: ["20"] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: 1,
+      name: "Roberto C. Silva",
+      active: false,
+      companies: [{ id: "20", name: "AND Construções" }]
+    });
+  });
+
+  it("returns 404 when updating an unknown whatsapp user", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .put("/api/v1/whatsapp-users/999")
+      .set(auth)
+      .send({ name: "X", phone: "47999990009", active: true, companyIds: [] });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses to delete a whatsapp user with diary entries", async () => {
+    const app = buildApp();
+    const res = await request(app).delete("/api/v1/whatsapp-users/1").set(auth);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "user_has_entries", code: "whatsappUser.hasEntries" });
+  });
+
+  it("deletes a whatsapp user without entries", async () => {
+    const app = buildApp();
+    await request(app)
+      .post("/api/v1/whatsapp-users")
+      .set(auth)
+      .send({ name: "Temporario", phone: "47 96666-5555", active: true, companyIds: [] });
+
+    const res = await request(app).delete("/api/v1/whatsapp-users/2").set(auth);
+    expect(res.status).toBe(200);
+    expect(store.whatsappUsers.map((u) => u.id)).toEqual([1]);
+  });
+
+  it("lists companies for the multi-select", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/companies").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { id: "10", name: "Construtora Tanen" },
+      { id: "20", name: "AND Construções" }
+    ]);
+  });
+
+  it("forbids non-admin users from managing whatsapp users", async () => {
+    const app = buildApp();
+    const managerToken = tokenFor({ id: 2, email: "inativo@tanen.com.br", name: "Usuário Inativo", role: "MANAGER" });
+
+    const list = await request(app).get("/api/v1/whatsapp-users").set("Authorization", `Bearer ${managerToken}`);
+    expect(list.status).toBe(403);
+
+    const companies = await request(app).get("/api/v1/companies").set("Authorization", `Bearer ${managerToken}`);
+    expect(companies.status).toBe(403);
   });
 });

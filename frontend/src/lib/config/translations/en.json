@@ -290,5 +290,13 @@
   "panelUser.password.optional": "New password (optional)",
   "panelUser.duplicated": "A user with this email already exists",
   "panelUser.passwordRequired": "Password is required",
-  "panelUser.lastActive": "Cannot remove or deactivate the last active user"
+  "panelUser.lastActive": "Cannot remove or deactivate the last active user",
+  "phone": "Phone",
+  "companies": "Companies",
+  "cadastros.tile.whatsappUsers": "WhatsApp users",
+  "whatsappUser.duplicated": "A user with this phone already exists",
+  "whatsappUser.invalidPhone": "Invalid phone. Enter area code and number (e.g. 47 99999-9999)",
+  "whatsappUser.hasEntries": "This user has diary entries and cannot be deleted. Deactivate it instead.",
+  "whatsappUser.phone.help": "WhatsApp number with area code. Country code 55 is added automatically.",
+  "whatsappUser.companies.help": "Companies the user can select when registering via WhatsApp."
 }

@@ -33,7 +33,8 @@ export class PrismaConversationStore implements ConversationStore {
       where: { phoneE164 }
     });
 
-    if (!user) {
+    // Usuário inativo é tratado como não cadastrado: o bot não responde.
+    if (!user || !user.active) {
       return null;
     }
 

@@ -290,5 +290,13 @@
   "panelUser.password.optional": "Nova senha (opcional)",
   "panelUser.duplicated": "Já existe um usuário com este email",
   "panelUser.passwordRequired": "Senha é obrigatória",
-  "panelUser.lastActive": "Não é possível remover ou desativar o último usuário ativo"
+  "panelUser.lastActive": "Não é possível remover ou desativar o último usuário ativo",
+  "phone": "Telefone",
+  "companies": "Empresas",
+  "cadastros.tile.whatsappUsers": "Usuários WhatsApp",
+  "whatsappUser.duplicated": "Já existe um usuário com este telefone",
+  "whatsappUser.invalidPhone": "Telefone inválido. Informe DDD e número (ex: 47 99999-9999)",
+  "whatsappUser.hasEntries": "Este usuário tem registros no diário e não pode ser excluído. Desative-o.",
+  "whatsappUser.phone.help": "Número usado no WhatsApp, com DDD. O DDI 55 é adicionado automaticamente.",
+  "whatsappUser.companies.help": "Empresas que o usuário pode selecionar ao registrar pelo WhatsApp."
 }

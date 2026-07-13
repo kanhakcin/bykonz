@@ -22,6 +22,7 @@ import { Route as PrivateCadastrosObrasIndexRouteImport } from './routes/_privat
 import { Route as PrivateCadastrosNormasIndexRouteImport } from './routes/_private/cadastros/normas/index';
 import { Route as PrivateCadastrosAtivosIndexRouteImport } from './routes/_private/cadastros/ativos/index';
 import { Route as PrivateCadastrosUsuariosAddIndexRouteImport } from './routes/_private/cadastros/usuarios/add/index';
+import { Route as PrivateCadastrosUsuariosAddWhatsappIndexRouteImport } from './routes/_private/cadastros/usuarios/add-whatsapp/index';
 import { Route as PrivateCadastrosPessoasAddIndexRouteImport } from './routes/_private/cadastros/pessoas/add/index';
 import { Route as PrivateCadastrosObrasAddIndexRouteImport } from './routes/_private/cadastros/obras/add/index';
 import { Route as PrivateCadastrosNormasAddIndexRouteImport } from './routes/_private/cadastros/normas/add/index';
@@ -96,6 +97,12 @@ const PrivateCadastrosUsuariosAddIndexRoute =
     path: '/cadastros/usuarios/add/',
     getParentRoute: () => PrivateRoute,
   } as any);
+const PrivateCadastrosUsuariosAddWhatsappIndexRoute =
+  PrivateCadastrosUsuariosAddWhatsappIndexRouteImport.update({
+    id: '/cadastros/usuarios/add-whatsapp/',
+    path: '/cadastros/usuarios/add-whatsapp/',
+    getParentRoute: () => PrivateRoute,
+  } as any);
 const PrivateCadastrosPessoasAddIndexRoute =
   PrivateCadastrosPessoasAddIndexRouteImport.update({
     id: '/cadastros/pessoas/add/',
@@ -136,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/cadastros/normas/add/': typeof PrivateCadastrosNormasAddIndexRoute;
   '/cadastros/obras/add/': typeof PrivateCadastrosObrasAddIndexRoute;
   '/cadastros/pessoas/add/': typeof PrivateCadastrosPessoasAddIndexRoute;
+  '/cadastros/usuarios/add-whatsapp/': typeof PrivateCadastrosUsuariosAddWhatsappIndexRoute;
   '/cadastros/usuarios/add/': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRoutesByTo {
@@ -153,6 +161,7 @@ export interface FileRoutesByTo {
   '/cadastros/normas/add': typeof PrivateCadastrosNormasAddIndexRoute;
   '/cadastros/obras/add': typeof PrivateCadastrosObrasAddIndexRoute;
   '/cadastros/pessoas/add': typeof PrivateCadastrosPessoasAddIndexRoute;
+  '/cadastros/usuarios/add-whatsapp': typeof PrivateCadastrosUsuariosAddWhatsappIndexRoute;
   '/cadastros/usuarios/add': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRoutesById {
@@ -173,6 +182,7 @@ export interface FileRoutesById {
   '/_private/cadastros/normas/add/': typeof PrivateCadastrosNormasAddIndexRoute;
   '/_private/cadastros/obras/add/': typeof PrivateCadastrosObrasAddIndexRoute;
   '/_private/cadastros/pessoas/add/': typeof PrivateCadastrosPessoasAddIndexRoute;
+  '/_private/cadastros/usuarios/add-whatsapp/': typeof PrivateCadastrosUsuariosAddWhatsappIndexRoute;
   '/_private/cadastros/usuarios/add/': typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 export interface FileRouteTypes {
@@ -192,6 +202,7 @@ export interface FileRouteTypes {
     | '/cadastros/normas/add/'
     | '/cadastros/obras/add/'
     | '/cadastros/pessoas/add/'
+    | '/cadastros/usuarios/add-whatsapp/'
     | '/cadastros/usuarios/add/';
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/cadastros/normas/add'
     | '/cadastros/obras/add'
     | '/cadastros/pessoas/add'
+    | '/cadastros/usuarios/add-whatsapp'
     | '/cadastros/usuarios/add';
   id:
     | '__root__'
@@ -228,6 +240,7 @@ export interface FileRouteTypes {
     | '/_private/cadastros/normas/add/'
     | '/_private/cadastros/obras/add/'
     | '/_private/cadastros/pessoas/add/'
+    | '/_private/cadastros/usuarios/add-whatsapp/'
     | '/_private/cadastros/usuarios/add/';
   fileRoutesById: FileRoutesById;
 }
@@ -329,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivateCadastrosUsuariosAddIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
+    '/_private/cadastros/usuarios/add-whatsapp/': {
+      id: '/_private/cadastros/usuarios/add-whatsapp/';
+      path: '/cadastros/usuarios/add-whatsapp';
+      fullPath: '/cadastros/usuarios/add-whatsapp/';
+      preLoaderRoute: typeof PrivateCadastrosUsuariosAddWhatsappIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
     '/_private/cadastros/pessoas/add/': {
       id: '/_private/cadastros/pessoas/add/';
       path: '/cadastros/pessoas/add';
@@ -374,6 +394,7 @@ interface PrivateRouteChildren {
   PrivateCadastrosNormasAddIndexRoute: typeof PrivateCadastrosNormasAddIndexRoute;
   PrivateCadastrosObrasAddIndexRoute: typeof PrivateCadastrosObrasAddIndexRoute;
   PrivateCadastrosPessoasAddIndexRoute: typeof PrivateCadastrosPessoasAddIndexRoute;
+  PrivateCadastrosUsuariosAddWhatsappIndexRoute: typeof PrivateCadastrosUsuariosAddWhatsappIndexRoute;
   PrivateCadastrosUsuariosAddIndexRoute: typeof PrivateCadastrosUsuariosAddIndexRoute;
 }
 
@@ -391,6 +412,8 @@ const PrivateRouteChildren: PrivateRouteChildren = {
   PrivateCadastrosNormasAddIndexRoute: PrivateCadastrosNormasAddIndexRoute,
   PrivateCadastrosObrasAddIndexRoute: PrivateCadastrosObrasAddIndexRoute,
   PrivateCadastrosPessoasAddIndexRoute: PrivateCadastrosPessoasAddIndexRoute,
+  PrivateCadastrosUsuariosAddWhatsappIndexRoute:
+    PrivateCadastrosUsuariosAddWhatsappIndexRoute,
   PrivateCadastrosUsuariosAddIndexRoute: PrivateCadastrosUsuariosAddIndexRoute,
 };
 

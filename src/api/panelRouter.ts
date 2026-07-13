@@ -8,12 +8,15 @@ import {
   DuplicatePersonCodeError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
+  DuplicateWhatsappUserPhoneError,
   InvalidDateError,
+  InvalidWhatsappPhoneError,
   LastActivePanelUserError,
   PanelUserPasswordRequiredError,
   PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
+  WhatsappUserHasEntriesError,
   type AssetInput,
   type PanelService,
   type PanelUserInput,
@@ -21,7 +24,8 @@ import {
   type PersonInput,
   type PersonStatus,
   type ProjectInput,
-  type StandardInput
+  type StandardInput,
+  type WhatsappUserInput
 } from "../services/panelService";
 import { InvalidReportDateError } from "../services/dailyReportService";
 
@@ -762,6 +766,118 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  // ---- WhatsApp users (bot access) registry (CRUD, admin only) --------------
+
+  router.use("/whatsapp-users", requirePanelRole("ADMIN"));
+
+  router.get("/whatsapp-users", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search = typeof req.query.search === "string" && req.query.search.trim() !== ""
+        ? req.query.search.trim()
+        : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listWhatsappUsers({ search, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/whatsapp-users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const user = await service.getWhatsappUser(id);
+      if (!user) {
+        res.status(404).json({ error: "whatsapp_user_not_found" });
+        return;
+      }
+
+      res.json(user);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/whatsapp-users", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const input = parseWhatsappUserInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      res.status(201).json(await service.createWhatsappUser(input));
+    } catch (error) {
+      handleWhatsappUserError(error, res, next);
+    }
+  });
+
+  router.put("/whatsapp-users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const input = parseWhatsappUserInput(req.body);
+      if (!input) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      const user = await service.updateWhatsappUser(id, input);
+      if (!user) {
+        res.status(404).json({ error: "whatsapp_user_not_found" });
+        return;
+      }
+
+      res.json(user);
+    } catch (error) {
+      handleWhatsappUserError(error, res, next);
+    }
+  });
+
+  router.delete("/whatsapp-users/:id", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = parseId(req.params.id);
+      if (id === null) {
+        res.status(400).json({ error: "invalid_id" });
+        return;
+      }
+
+      const found = await service.deleteWhatsappUser(id);
+      if (!found) {
+        res.status(404).json({ error: "whatsapp_user_not_found" });
+        return;
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      handleWhatsappUserError(error, res, next);
+    }
+  });
+
+  // Lista de empresas para o multi-select de vínculos do usuário WhatsApp.
+  router.get("/companies", requirePanelRole("ADMIN"), async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await service.listCompanies());
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/me", (req: AuthenticatedRequest, res: Response) => {
     const user = req.panelUser!;
     res.json({ id: user.sub, email: user.email, name: user.name, role: user.role, initials: initialsOf(user.name) });
@@ -833,6 +949,56 @@ function handlePanelUserError(error: unknown, res: Response, next: NextFunction)
     return;
   }
   next(error);
+}
+
+function handleWhatsappUserError(error: unknown, res: Response, next: NextFunction): void {
+  if (error instanceof DuplicateWhatsappUserPhoneError) {
+    res.status(409).json({ error: "duplicate_phone", code: "whatsappUser.duplicated" });
+    return;
+  }
+  if (error instanceof InvalidWhatsappPhoneError) {
+    res.status(400).json({ error: "invalid_phone", code: "whatsappUser.invalidPhone" });
+    return;
+  }
+  if (error instanceof WhatsappUserHasEntriesError) {
+    res.status(409).json({ error: "user_has_entries", code: "whatsappUser.hasEntries" });
+    return;
+  }
+  next(error);
+}
+
+function parseWhatsappUserInput(body: unknown): WhatsappUserInput | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { name, phone, role, active, companyIds } = body as Record<string, unknown>;
+  if (typeof name !== "string" || name.trim() === "" || name.length > 200) {
+    return null;
+  }
+  if (typeof phone !== "string" || phone.trim() === "" || phone.length > 30) {
+    return null;
+  }
+  if (role !== undefined && role !== null && (typeof role !== "string" || role.length > 100)) {
+    return null;
+  }
+  if (active !== undefined && typeof active !== "boolean") {
+    return null;
+  }
+  if (
+    !Array.isArray(companyIds) ||
+    !companyIds.every((id) => (typeof id === "string" && /^\d+$/.test(id)) || (typeof id === "number" && Number.isInteger(id)))
+  ) {
+    return null;
+  }
+
+  return {
+    name: name.trim(),
+    phone: phone.trim(),
+    role: typeof role === "string" ? role : null,
+    active: active ?? true,
+    companyIds: companyIds.map((id) => String(id))
+  };
 }
 
 const PANEL_USER_ROLES: PanelUserRole[] = ["ADMIN", "MANAGER"];

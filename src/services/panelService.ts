@@ -258,6 +258,39 @@ export interface PanelUserListResult {
   totalCount: number;
 }
 
+// ---- Usuários WhatsApp (tabela users — quem o bot responde) -----------------
+
+export interface CompanyRef {
+  /** BigInt serializado como string para o JSON da API. */
+  id: string;
+  name: string | null;
+}
+
+export interface WhatsappUserListItem {
+  id: number;
+  name: string | null;
+  /** Telefone em E.164 (ex: +5547999999999). */
+  phoneE164: string;
+  role: string | null;
+  active: boolean;
+  companies: CompanyRef[];
+}
+
+export interface WhatsappUserInput {
+  name: string;
+  /** Telefone livre (com ou sem máscara); normalização é do PanelService. */
+  phone: string;
+  role?: string | null;
+  active: boolean;
+  /** Empresas que o usuário pode selecionar no fluxo (user_companies). */
+  companyIds: string[];
+}
+
+export interface WhatsappUserListResult {
+  data: WhatsappUserListItem[];
+  totalCount: number;
+}
+
 export interface PanelStore {
   getProject(projectId?: number): Promise<ProjectRecord | null>;
   findEntriesForDay(input: { projectId: number; start: Date; end: Date }): Promise<EntryRecord[]>;
@@ -306,6 +339,22 @@ export interface PanelStore {
   ): Promise<PanelUserListItem | null>;
   deletePanelUser(id: number): Promise<boolean>;
   countActivePanelUsers(excludingId?: number): Promise<number>;
+  listWhatsappUsers(input: PanelUserListInput): Promise<WhatsappUserListResult>;
+  findWhatsappUserById(id: number): Promise<WhatsappUserListItem | null>;
+  createWhatsappUser(input: {
+    phoneE164: string;
+    name: string;
+    role: string | null;
+    active: boolean;
+    companyIds: bigint[];
+  }): Promise<WhatsappUserListItem>;
+  updateWhatsappUser(
+    id: number,
+    input: { phoneE164: string; name: string; role: string | null; active: boolean; companyIds: bigint[] }
+  ): Promise<WhatsappUserListItem | null>;
+  /** Lança WhatsappUserHasEntriesError se o usuário tem registros no diário. */
+  deleteWhatsappUser(id: number): Promise<boolean>;
+  listCompanies(): Promise<CompanyRef[]>;
 }
 
 // ---- API DTOs ---------------------------------------------------------------
@@ -734,6 +783,58 @@ export class PanelService {
     return this.store.deletePanelUser(id);
   }
 
+  // ---- Usuários WhatsApp (liberados para o bot) -----------------------------
+
+  listWhatsappUsers(input: PanelUserListInput): Promise<WhatsappUserListResult> {
+    return this.store.listWhatsappUsers(input);
+  }
+
+  getWhatsappUser(id: number): Promise<WhatsappUserListItem | null> {
+    return this.store.findWhatsappUserById(id);
+  }
+
+  createWhatsappUser(input: WhatsappUserInput): Promise<WhatsappUserListItem> {
+    return this.store.createWhatsappUser(this.normalizeWhatsappUserInput(input));
+  }
+
+  updateWhatsappUser(id: number, input: WhatsappUserInput): Promise<WhatsappUserListItem | null> {
+    return this.store.updateWhatsappUser(id, this.normalizeWhatsappUserInput(input));
+  }
+
+  deleteWhatsappUser(id: number): Promise<boolean> {
+    return this.store.deleteWhatsappUser(id);
+  }
+
+  listCompanies(): Promise<CompanyRef[]> {
+    return this.store.listCompanies();
+  }
+
+  private normalizeWhatsappUserInput(input: WhatsappUserInput): {
+    phoneE164: string;
+    name: string;
+    role: string | null;
+    active: boolean;
+    companyIds: bigint[];
+  } {
+    // Aceita máscara ((47) 99999-9999) e prefixa o DDI 55 quando o número
+    // vier no formato nacional — o bot busca pelo número internacional.
+    let digits = input.phone.replace(/\D/g, "");
+    if (digits.length === 10 || digits.length === 11) {
+      digits = `55${digits}`;
+    }
+    if (digits.length < 12 || digits.length > 15) {
+      throw new InvalidWhatsappPhoneError(input.phone);
+    }
+
+    return {
+      phoneE164: `+${digits}`,
+      name: input.name.trim(),
+      role: input.role?.trim() || null,
+      active: input.active,
+      companyIds: input.companyIds.map((id) => BigInt(id))
+    };
+  }
+
   async getMedia(id: bigint): Promise<DiaryMedia | null> {
     if (!this.options.mediaStorage) {
       throw new Error("Panel media storage is not configured");
@@ -924,6 +1025,30 @@ export class LastActivePanelUserError extends Error {
   constructor() {
     super("Cannot deactivate or delete the last active panel user");
     this.name = "LastActivePanelUserError";
+  }
+}
+
+/** A WhatsApp user with the same phone already exists. */
+export class DuplicateWhatsappUserPhoneError extends Error {
+  constructor(phoneE164: string) {
+    super(`WhatsApp user phone already exists: ${phoneE164}`);
+    this.name = "DuplicateWhatsappUserPhoneError";
+  }
+}
+
+/** Phone is not a valid WhatsApp number (expects DDI+DDD+number, 12-15 digits). */
+export class InvalidWhatsappPhoneError extends Error {
+  constructor(phone: string) {
+    super(`Invalid WhatsApp phone: ${phone}`);
+    this.name = "InvalidWhatsappPhoneError";
+  }
+}
+
+/** WhatsApp users with diary entries cannot be deleted (deactivate instead). */
+export class WhatsappUserHasEntriesError extends Error {
+  constructor(id: number) {
+    super(`WhatsApp user ${id} has diary entries and cannot be deleted`);
+    this.name = "WhatsappUserHasEntriesError";
   }
 }
 

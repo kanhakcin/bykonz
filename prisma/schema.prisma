@@ -441,6 +441,8 @@ model User {
   phoneE164 String   @unique @map("phone_e164")
   name      String?
   role      String?
+  // Libera/bloqueia a resposta do bot sem apagar o registro (entries preservados).
+  active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

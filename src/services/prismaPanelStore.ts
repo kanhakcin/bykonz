@@ -6,9 +6,11 @@ import {
   DuplicatePersonCodeError,
   DuplicateProjectCodeError,
   DuplicateStandardCodeError,
+  DuplicateWhatsappUserPhoneError,
   PersonInUseError,
   ProjectInUseError,
   StandardInUseError,
+  WhatsappUserHasEntriesError,
   type AlertRecord,
   type AssetInput,
   type AssetListInput,
@@ -36,7 +38,10 @@ import {
   type StandardInput,
   type StandardListInput,
   type StandardListResult,
-  type StandardRecord
+  type StandardRecord,
+  type CompanyRef,
+  type WhatsappUserListItem,
+  type WhatsappUserListResult
 } from "./panelService";
 
 const PANEL_USER_SELECT = {
@@ -46,6 +51,26 @@ const PANEL_USER_SELECT = {
   role: true,
   active: true
 } as const;
+
+const WHATSAPP_USER_INCLUDE = {
+  companies: { include: { company: { select: { id: true, name: true } } } }
+} as const;
+
+type WhatsappUserRow = Prisma.UserGetPayload<{ include: typeof WHATSAPP_USER_INCLUDE }>;
+
+function mapWhatsappUser(row: WhatsappUserRow): WhatsappUserListItem {
+  return {
+    id: row.id,
+    name: row.name,
+    phoneE164: row.phoneE164,
+    role: row.role,
+    active: row.active,
+    companies: row.companies.map((link) => ({
+      id: link.company.id.toString(),
+      name: link.company.name
+    }))
+  };
+}
 
 const STANDARD_SELECT = {
   id: true,
@@ -714,6 +739,120 @@ export class PrismaPanelStore implements PanelStore {
     return this.prisma.panelUser.count({
       where: { active: true, id: excludingId ? { not: excludingId } : undefined }
     });
+  }
+
+  // ---- Usuários WhatsApp (tabela users — quem o bot responde) ---------------
+
+  async listWhatsappUsers(input: PanelUserListInput): Promise<WhatsappUserListResult> {
+    const where: Prisma.UserWhereInput = input.search
+      ? {
+          OR: [
+            { name: { contains: input.search, mode: "insensitive" } },
+            { phoneE164: { contains: input.search.replace(/[^\d+]/g, "") || input.search } }
+          ]
+        }
+      : {};
+
+    const [rows, totalCount] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        include: WHATSAPP_USER_INCLUDE,
+        orderBy: { name: "asc" },
+        skip: input.page * input.size,
+        take: input.size
+      }),
+      this.prisma.user.count({ where })
+    ]);
+
+    return { data: rows.map(mapWhatsappUser), totalCount };
+  }
+
+  async findWhatsappUserById(id: number): Promise<WhatsappUserListItem | null> {
+    const row = await this.prisma.user.findUnique({ where: { id }, include: WHATSAPP_USER_INCLUDE });
+    return row ? mapWhatsappUser(row) : null;
+  }
+
+  async createWhatsappUser(input: {
+    phoneE164: string;
+    name: string;
+    role: string | null;
+    active: boolean;
+    companyIds: bigint[];
+  }): Promise<WhatsappUserListItem> {
+    try {
+      const row = await this.prisma.user.create({
+        data: {
+          phoneE164: input.phoneE164,
+          name: input.name,
+          role: input.role,
+          active: input.active,
+          companies: { create: input.companyIds.map((companyId) => ({ companyId })) }
+        },
+        include: WHATSAPP_USER_INCLUDE
+      });
+      return mapWhatsappUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2002")) {
+        throw new DuplicateWhatsappUserPhoneError(input.phoneE164);
+      }
+      throw error;
+    }
+  }
+
+  async updateWhatsappUser(
+    id: number,
+    input: { phoneE164: string; name: string; role: string | null; active: boolean; companyIds: bigint[] }
+  ): Promise<WhatsappUserListItem | null> {
+    try {
+      const row = await this.prisma.user.update({
+        where: { id },
+        data: {
+          phoneE164: input.phoneE164,
+          name: input.name,
+          role: input.role,
+          active: input.active,
+          // Substitui o conjunto de empresas vinculadas (user_companies).
+          companies: {
+            deleteMany: {},
+            create: input.companyIds.map((companyId) => ({ companyId }))
+          }
+        },
+        include: WHATSAPP_USER_INCLUDE
+      });
+      return mapWhatsappUser(row);
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return null;
+      }
+      if (isPrismaError(error, "P2002")) {
+        throw new DuplicateWhatsappUserPhoneError(input.phoneE164);
+      }
+      throw error;
+    }
+  }
+
+  async deleteWhatsappUser(id: number): Promise<boolean> {
+    try {
+      await this.prisma.user.delete({ where: { id } });
+      return true;
+    } catch (error) {
+      if (isPrismaError(error, "P2025")) {
+        return false;
+      }
+      // Usuário com registros no diário não pode ser apagado (desative-o).
+      if (isPrismaError(error, "P2003")) {
+        throw new WhatsappUserHasEntriesError(id);
+      }
+      throw error;
+    }
+  }
+
+  async listCompanies(): Promise<CompanyRef[]> {
+    const companies = await this.prisma.company.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" }
+    });
+    return companies.map((company) => ({ id: company.id.toString(), name: company.name }));
   }
 
   /** Empresa padrão do painel (cliente único na v1): a primeira cadastrada. */

@@ -267,6 +267,16 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");
   });
 
+  it("stays in standby for group chats — no reply, no state created", async () => {
+    const { service, store, messaging } = createHarness();
+    const groupChatId = "120363012345678901@g.us";
+
+    await service.handleWebhook(textWebhook("oi", groupChatId));
+
+    expect(messaging.messages).toHaveLength(0);
+    expect(store.states.get(groupChatId)).toBeUndefined();
+  });
+
   it("uses nested WAHA SenderAlt fields for phone lookup when from is a lid", async () => {
     const { service, store, messaging } = createHarness();
     const lidChatId = "999999999999999@lid";

@@ -56,6 +56,10 @@ export class ConversationService {
       return;
     }
 
+    if (this.isGroupChat(chatId)) {
+      return;
+    }
+
     await this.withChatLock(chatId, () => this.processWebhook(chatId, webhook));
   }
 
@@ -251,6 +255,11 @@ export class ConversationService {
     }
 
     return true;
+  }
+
+  /** Grupos (ex. usados para o relatório automático) ficam em standby: o bot nunca responde lá, só recebe o PDF automático. */
+  private isGroupChat(chatId: string): boolean {
+    return chatId.endsWith("@g.us");
   }
 
   private isResetCommand(text: string): boolean {

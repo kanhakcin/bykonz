@@ -78,11 +78,11 @@ function DailyPdfDialog() {
     if (!projectId) return;
 
     try {
-      const blob = await downloadReport.mutateAsync({ projectId, date });
+      const { blob, filename } = await downloadReport.mutateAsync({ projectId, date });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `diario-obra-${projectId}-${date}.pdf`;
+      link.download = filename ?? `diario-obra-${projectId}-${date}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
     } catch {

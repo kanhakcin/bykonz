@@ -45,7 +45,9 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     cors({
       origin: options.corsOrigins ?? ["http://localhost:5173"],
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Authorization", "Content-Type"]
+      allowedHeaders: ["Authorization", "Content-Type"],
+      // Permite o frontend ler o nome do arquivo do diário mesmo em cross-origin.
+      exposedHeaders: ["Content-Disposition"]
     })
   );
   router.use(express.json());

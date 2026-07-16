@@ -434,7 +434,9 @@ export interface DiaryMedia {
 }
 
 export interface DailyReportGenerator {
-  generateForObraDay(input: { obraId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null>;
+  generateForObraDay(
+    input: { obraId: number; date: string }
+  ): Promise<{ buffer: Buffer; totalEntradas: number; filename: string | null } | null>;
 }
 
 export class PanelService {
@@ -851,7 +853,9 @@ export class PanelService {
     };
   }
 
-  async getDailyReportPdf(input: { projectId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null> {
+  async getDailyReportPdf(
+    input: { projectId: number; date: string }
+  ): Promise<{ buffer: Buffer; totalEntradas: number; filename: string | null } | null> {
     if (!this.options.dailyReportService) {
       throw new Error("Daily report service is not configured");
     }

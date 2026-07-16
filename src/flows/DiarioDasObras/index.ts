@@ -1433,7 +1433,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
     await this.deps.messaging.sendFile(chatId, {
       mimetype: "application/pdf",
-      filename: `diario-obra-${obraId}-${isoDate}.pdf`,
+      filename: result.filename ?? `diario-obra-${obraId}-${isoDate}.pdf`,
       data: result.buffer.toString("base64")
     });
 

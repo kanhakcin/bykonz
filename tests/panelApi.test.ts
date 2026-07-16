@@ -761,14 +761,16 @@ const storage = {
 };
 
 class FakeDailyReportGenerator implements DailyReportGenerator {
-  async generateForObraDay(input: { obraId: number; date: string }): Promise<{ buffer: Buffer; totalEntradas: number } | null> {
+  async generateForObraDay(
+    input: { obraId: number; date: string }
+  ): Promise<{ buffer: Buffer; totalEntradas: number; filename: string | null } | null> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
       throw new InvalidReportDateError(input.date);
     }
     if (input.obraId !== 1) {
       return null;
     }
-    return { buffer: Buffer.from("%PDF-fake"), totalEntradas: 2 };
+    return { buffer: Buffer.from("%PDF-fake"), totalEntradas: 2, filename: "MRH - DO 133 - 14-07-26.pdf" };
   }
 }
 
@@ -1729,6 +1731,7 @@ describe("GET /api/v1/projects/:id/report", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("application/pdf");
     expect(res.headers["content-disposition"]).toContain("attachment");
+    expect(res.headers["content-disposition"]).toContain('filename="MRH - DO 133 - 14-07-26.pdf"');
     expect(res.body.slice(0, 4).toString()).toBe("%PDF");
   });
 

@@ -324,7 +324,7 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
         return;
       }
 
-      const filename = `diario-obra-${id}-${date}.pdf`;
+      const filename = result.filename ?? `diario-obra-${id}-${date}.pdf`;
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(result.buffer);

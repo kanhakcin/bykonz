@@ -151,6 +151,12 @@ export interface ConversationStore {
   findEntradasForObraDay(input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]>;
   findObraById(obraId: number): Promise<ObraForReport | null>;
   findObrasForAutoReport(): Promise<ObraForReport[]>;
+  /**
+   * Atribui (ou reusa) o número sequencial do diário de obra para um dia.
+   * Idempotente por (projeto, data): a primeira chamada consome o próximo
+   * número do projeto; chamadas seguintes para o mesmo dia devolvem o mesmo.
+   */
+  assignDailyReportNumber(input: { obraId: number; date: string }): Promise<number>;
 }
 
 export interface MessagingClient {
@@ -200,7 +206,7 @@ export interface DailyReportGenerator {
   generateForObraDay(input: {
     obraId: number;
     date: string;
-  }): Promise<{ buffer: Buffer; totalEntradas: number } | null>;
+  }): Promise<{ buffer: Buffer; totalEntradas: number; filename: string | null } | null>;
 }
 
 export interface ConversationServiceDeps {

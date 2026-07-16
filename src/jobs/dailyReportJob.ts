@@ -37,7 +37,7 @@ export async function runDailyReportJob(deps: DailyReportJobDeps, referenceDate:
 
       await deps.messaging.sendFile(obra.whatsappGroupId, {
         mimetype: "application/pdf",
-        filename: `diario-obra-${referenceDate}.pdf`,
+        filename: result.filename ?? `diario-obra-${referenceDate}.pdf`,
         data: result.buffer.toString("base64")
       });
       await deps.messaging.sendText(obra.whatsappGroupId, "✅ Diário de obra gerado e enviado automaticamente.");

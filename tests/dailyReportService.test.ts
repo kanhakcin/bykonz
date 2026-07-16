@@ -26,6 +26,7 @@ function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStor
     findEntradasForObraDay: async () => [],
     findObraById: async () => null,
     findObrasForAutoReport: async () => [],
+    assignDailyReportNumber: async () => 1,
     ...overrides
   };
 }
@@ -63,8 +64,16 @@ describe("DailyReportService", () => {
   });
 
   it("generates a PDF with zero entradas when the obra has no records that day", async () => {
+    let assignCalls = 0;
     const service = new DailyReportService(
-      makeStore({ findObraById: async () => OBRA, findEntradasForObraDay: async () => [] }),
+      makeStore({
+        findObraById: async () => OBRA,
+        findEntradasForObraDay: async () => [],
+        assignDailyReportNumber: async () => {
+          assignCalls += 1;
+          return 1;
+        }
+      }),
       makePdfGenerator()
     );
 
@@ -73,6 +82,9 @@ describe("DailyReportService", () => {
     expect(result).not.toBeNull();
     expect(result?.totalEntradas).toBe(0);
     expect(result?.buffer).toBeInstanceOf(Buffer);
+    // Dia sem registros não consome número de sequência nem gera nome de arquivo.
+    expect(result?.filename).toBeNull();
+    expect(assignCalls).toBe(0);
   });
 
   it("generates a PDF aggregating entradas from multiple companies", async () => {
@@ -111,7 +123,11 @@ describe("DailyReportService", () => {
     };
 
     const service = new DailyReportService(
-      makeStore({ findObraById: async () => OBRA, findEntradasForObraDay: async () => entradas }),
+      makeStore({
+        findObraById: async () => OBRA,
+        findEntradasForObraDay: async () => entradas,
+        assignDailyReportNumber: async () => 133
+      }),
       pdfGenerator
     );
 
@@ -123,5 +139,41 @@ describe("DailyReportService", () => {
     expect(receivedInput?.obraCodigo).toBe("130");
     expect(receivedInput?.construtoraNome).toBe("Construtora Tanen");
     expect(receivedInput?.reportDate).toBe("2026-06-22");
+    // Nome do arquivo no padrão "{código} - DO {sequência} - {DD-MM-AA}.pdf".
+    expect(result?.filename).toBe("130 - DO 133 - 22-06-26.pdf");
+  });
+
+  it("reuses the assigned sequence for the same day and builds the filename from the project code", async () => {
+    let calls = 0;
+    const service = new DailyReportService(
+      makeStore({
+        findObraById: async () => OBRA,
+        findEntradasForObraDay: async () => [
+          {
+            id: 1n,
+            description: "Registro",
+            createdAt: new Date("2026-07-14T10:00:00Z"),
+            tipo: "Inspecao de servico",
+            tipoServico: null,
+            numeroProcedimento: null,
+            empresaNome: "Empresa A",
+            usuarioNome: "Joao",
+            mediaUrls: []
+          }
+        ],
+        assignDailyReportNumber: async () => {
+          calls += 1;
+          return 133;
+        }
+      }),
+      makePdfGenerator()
+    );
+
+    const first = await service.generateForObraDay({ obraId: 1, date: "2026-07-14" });
+    const second = await service.generateForObraDay({ obraId: 1, date: "2026-07-14" });
+
+    expect(first?.filename).toBe("130 - DO 133 - 14-07-26.pdf");
+    expect(second?.filename).toBe("130 - DO 133 - 14-07-26.pdf");
+    expect(calls).toBe(2);
   });
 });

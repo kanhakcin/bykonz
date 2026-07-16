@@ -328,6 +328,37 @@ export class PrismaConversationStore implements ConversationStore {
     }));
   }
 
+  async assignDailyReportNumber(input: { obraId: number; date: string }): Promise<number> {
+    // Data normalizada em meia-noite UTC para casar com a coluna DATE.
+    const reportDate = new Date(`${input.date}T00:00:00.000Z`);
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.dailyReportNumber.findUnique({
+        where: { projectId_reportDate: { projectId: input.obraId, reportDate } },
+        select: { sequence: true }
+      });
+      if (existing) {
+        return existing.sequence;
+      }
+
+      const project = await tx.project.findUnique({
+        where: { id: input.obraId },
+        select: { diaryNextSequence: true }
+      });
+      const sequence = project?.diaryNextSequence ?? 1;
+
+      await tx.dailyReportNumber.create({
+        data: { projectId: input.obraId, reportDate, sequence }
+      });
+      await tx.project.update({
+        where: { id: input.obraId },
+        data: { diaryNextSequence: sequence + 1 }
+      });
+
+      return sequence;
+    });
+  }
+
   /**
    * Pipeline de identificação, etapa [1] (determinística) — extrai códigos
    * entre parênteses da legenda, resolve pela tabela de prefixos do setor e

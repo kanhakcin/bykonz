@@ -72,7 +72,9 @@ describe("runDailyReportJob", () => {
   it("sends the PDF file when the obra has records that day", async () => {
     const messaging = makeMessaging();
     const dailyReportService = {
-      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF-content"), totalEntradas: 3 })
+      generateForObraDay: vi
+        .fn()
+        .mockResolvedValue({ buffer: Buffer.from("%PDF-content"), totalEntradas: 3, filename: "MRH - DO 133 - 06-07-26.pdf" })
     } as unknown as DailyReportService;
     const deps: DailyReportJobDeps = {
       dailyReportService,
@@ -85,6 +87,7 @@ describe("runDailyReportJob", () => {
     expect(messaging.files).toHaveLength(1);
     expect(messaging.files[0].chatId).toBe("1203630xxxxx@g.us");
     expect(messaging.files[0].file.mimetype).toBe("application/pdf");
+    expect(messaging.files[0].file.filename).toBe("MRH - DO 133 - 06-07-26.pdf");
     expect(Buffer.from(messaging.files[0].file.data, "base64").toString()).toBe("%PDF-content");
     expect(messaging.messages).toHaveLength(1);
     expect(messaging.messages[0].chatId).toBe("1203630xxxxx@g.us");

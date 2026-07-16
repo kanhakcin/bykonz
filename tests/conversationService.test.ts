@@ -41,6 +41,8 @@ class FakeStore implements ConversationStore {
   media: Array<{ entradaId: bigint; mediaUrl: string; mediaTipo?: string | null }> = [];
   reportEntradas: EntradaForReport[] = [];
   obrasForReport: ObraForReport[] = [];
+  diaryNextSequenceByObra = new Map<number, number>();
+  assignedDailyNumbers = new Map<string, number>();
 
   async findUserByPhone(phoneDigits: string): Promise<UserRecord | null> {
     return this.users.get(phoneDigits) ?? null;
@@ -137,6 +139,18 @@ class FakeStore implements ConversationStore {
 
   async findObrasForAutoReport(): Promise<ObraForReport[]> {
     return this.obrasForReport.filter((obra) => obra.status === "ACTIVE" && obra.whatsappAutoReportEnabled);
+  }
+
+  async assignDailyReportNumber(input: { obraId: number; date: string }): Promise<number> {
+    const key = `${input.obraId}:${input.date}`;
+    const existing = this.assignedDailyNumbers.get(key);
+    if (existing != null) {
+      return existing;
+    }
+    const next = this.diaryNextSequenceByObra.get(input.obraId) ?? 1;
+    this.assignedDailyNumbers.set(key, next);
+    this.diaryNextSequenceByObra.set(input.obraId, next + 1);
+    return next;
   }
 }
 
@@ -1440,7 +1454,7 @@ describe("ConversationService", () => {
       });
       expect(messaging.files).toHaveLength(1);
       expect(messaging.files[0].file.mimetype).toBe("application/pdf");
-      expect(messaging.files[0].file.filename).toBe("diario-obra-1-2026-06-22.pdf");
+      expect(messaging.files[0].file.filename).toBe("130 - DO 1 - 22-06-26.pdf");
       expect(messaging.files[0].file.data).toBeTruthy();
       expect(store.states.get(CHAT_ID)).toMatchObject({ step: "MAIN_MENU", selectedObraId: 1 });
       expect(messaging.messages.at(-1)?.text).toContain("7) Gerar diario de obra");

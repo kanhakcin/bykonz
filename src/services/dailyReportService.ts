@@ -10,6 +10,12 @@ export class InvalidReportDateError extends Error {
 export interface DailyReportResult {
   buffer: Buffer;
   totalEntradas: number;
+  /**
+   * Nome do arquivo PDF no padrão "{código} - DO {sequência} - {DD-MM-AA}.pdf"
+   * (ex.: "MRH - DO 133 - 14-07-26.pdf"). É `null` quando o dia não tem
+   * registros — nesse caso nenhum PDF é enviado e nenhum número é consumido.
+   */
+  filename: string | null;
 }
 
 export class DailyReportService {
@@ -50,6 +56,30 @@ export class DailyReportService {
       entradas
     });
 
-    return { buffer, totalEntradas: entradas.length };
+    // Dia sem registros não gera PDF nos canais; não consome número de sequência.
+    if (entradas.length === 0) {
+      return { buffer, totalEntradas: 0, filename: null };
+    }
+
+    const sequence = await this.store.assignDailyReportNumber({ obraId: obra.id, date: input.date });
+    const filename = buildDailyReportFilename(obra.codigo, obra.id, sequence, input.date);
+
+    return { buffer, totalEntradas: entradas.length, filename };
   }
+}
+
+/**
+ * Monta o nome do arquivo do diário: "{código} - DO {sequência} - {DD-MM-AA}.pdf".
+ * Sem código cadastrado, usa o id da obra como identificador (fallback).
+ */
+export function buildDailyReportFilename(
+  code: string | null | undefined,
+  obraId: number,
+  sequence: number,
+  isoDate: string
+): string {
+  const identifier = code?.trim() ? code.trim() : String(obraId);
+  const [year, month, day] = isoDate.split("-");
+  const shortDate = `${day}-${month}-${year.slice(2)}`;
+  return `${identifier} - DO ${sequence} - ${shortDate}.pdf`;
 }

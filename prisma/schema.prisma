@@ -179,19 +179,40 @@ model Project {
   attributes                Json?
   whatsappGroupId           String?  @map("whatsapp_group_id")
   whatsappAutoReportEnabled Boolean  @default(false) @map("whatsapp_auto_report_enabled")
+  // Próximo número sequencial a atribuir ao diário de obra (DO) deste projeto.
+  // Configurado uma vez por projeto (via backend) para dar continuidade à
+  // numeração manual; incrementa a cada novo dia que gera relatório.
+  diaryNextSequence         Int?     @map("diary_next_sequence")
   createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  sector   Sector    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  assets   Asset[]
-  machines Machine[]
-  people   Person[]
-  entries  Entry[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sector             Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  assets             Asset[]
+  machines           Machine[]
+  people             Person[]
+  entries            Entry[]
+  dailyReportNumbers DailyReportNumber[]
 
   @@unique([companyId, code])
   @@index([sectorId])
   @@map("projects")
+}
+
+/// Numeração sequencial do diário de obra (DO) por dia. O número é atribuído
+/// na primeira geração de um dia com registros e reusado em regerações, para
+/// que painel, bot e cron produzam sempre o mesmo nome de arquivo.
+model DailyReportNumber {
+  id         Int      @id @default(autoincrement())
+  projectId  Int      @map("project_id")
+  reportDate DateTime @map("report_date") @db.Date
+  sequence   Int
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, reportDate])
+  @@map("daily_report_numbers")
 }
 
 model Asset {

@@ -41,6 +41,29 @@ export class PrismaConversationStore implements ConversationStore {
     return {
       id: user.id,
       phoneE164: user.phoneE164.replace(/^\+/, ""),
+      telegramUserId: user.telegramUserId,
+      nome: user.name
+    };
+  }
+
+  async findUserByTelegramId(telegramUserId: string): Promise<UserRecord | null> {
+    if (!telegramUserId) {
+      return null;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { telegramUserId }
+    });
+
+    // Usuário inativo é tratado como não cadastrado: o bot não responde.
+    if (!user || !user.active) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      phoneE164: user.phoneE164.replace(/^\+/, ""),
+      telegramUserId: user.telegramUserId,
       nome: user.name
     };
   }

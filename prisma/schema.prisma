@@ -458,10 +458,14 @@ model PanelUser {
 // ---------------------------------------------------------------------------
 
 model User {
-  id        Int      @id @default(autoincrement())
-  phoneE164 String   @unique @map("phone_e164")
-  name      String?
-  role      String?
+  id             Int     @id @default(autoincrement())
+  phoneE164      String  @unique @map("phone_e164")
+  // Identidade do operador no Telegram (numérica, como string). Fica ao lado do
+  // telefone: o match de acesso passa a ser por telefone (WhatsApp) OU por
+  // telegram id (Telegram). Ver docs/plano-suporte-telegram.md.
+  telegramUserId String? @unique @map("telegram_user_id")
+  name           String?
+  role           String?
   // Libera/bloqueia a resposta do bot sem apagar o registro (entries preservados).
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

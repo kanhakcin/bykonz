@@ -11,6 +11,7 @@ import type {
 function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStore {
   return {
     findUserByPhone: async () => null,
+    findUserByTelegramId: async () => null,
     findEmpresasByUser: async () => [],
     findObrasAtivas: async () => [],
     getState: async () => null,

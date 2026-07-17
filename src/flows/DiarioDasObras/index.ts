@@ -1,4 +1,4 @@
-import type { WahaMessagePayload } from "../../types/waha";
+import type { IncomingMessage } from "../../types/message";
 import type {
   ConversationServiceDeps,
   ConversationStateRecord,
@@ -668,14 +668,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    payload: WahaMessagePayload
+    payload: IncomingMessage
   ): Promise<void> {
     if (!state.selectedEmpresaId || !state.pendingEntradaId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
 
-    const text = (payload.body ?? "").trim().toLowerCase();
+    const text = payload.text.trim().toLowerCase();
     const photoCount = state.selectedTrainingPhotoCount ?? 0;
     if (TRAINING_PHOTO_DONE_COMMANDS.has(text)) {
       if (photoCount === 0) {
@@ -721,7 +721,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    payload: WahaMessagePayload
+    payload: IncomingMessage
   ): Promise<void> {
     if (!state.selectedEmpresaId || !state.pendingEntradaId) {
       await this.resetToMenu(chatId, phoneE164);
@@ -750,14 +750,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     chatId: string;
     userId: number;
     state: ConversationStateRecord;
-    payload: WahaMessagePayload;
+    payload: IncomingMessage;
     mediaTipo: TrainingMediaType;
     allowedKinds: "image" | "image-or-pdf";
     missingMessage: string;
     invalidMessage: string;
   }): Promise<boolean> {
     const media = input.payload.media;
-    if (!input.payload.hasMedia || !media?.url) {
+    if (!media?.ref) {
       await this.deps.messaging.sendText(input.chatId, input.missingMessage);
       return false;
     }
@@ -771,12 +771,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     try {
-      const body = await this.deps.mediaDownloader.download(media.url);
+      const body = await this.deps.mediaDownloader.download(media.ref);
       const objectPath = buildStoragePath({
         empresaId: input.state.selectedEmpresaId!,
         userId: input.userId,
         obraId: input.state.selectedObraId,
-        messageId: input.payload.id,
+        messageId: input.payload.messageId,
         filename: media.filename,
         contentType
       });
@@ -885,7 +885,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    payload: WahaMessagePayload
+    payload: IncomingMessage
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
     const tipoServico = this.requireSelectedTipoServico(state);
@@ -895,7 +895,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     const media = payload.media;
-    if (!payload.hasMedia || !media?.url) {
+    if (!media?.ref) {
       await this.sendWithHeader(chatId, state.selectedObraNome, "📸 Preciso de uma foto pra continuar. Manda ela aí.");
       return;
     }
@@ -907,12 +907,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     try {
-      const body = await this.deps.mediaDownloader.download(media.url);
+      const body = await this.deps.mediaDownloader.download(media.ref);
       const objectPath = buildStoragePath({
         empresaId: state.selectedEmpresaId,
         userId,
         obraId: state.selectedObraId,
-        messageId: payload.id,
+        messageId: payload.messageId,
         filename: media.filename,
         contentType
       });
@@ -938,7 +938,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         mediaUrl: objectPath
       });
 
-      const caption = (payload.body ?? "").trim();
+      const caption = payload.text.trim();
       if (caption) {
         // Usuario mandou a descricao junto da imagem (legenda). Aproveita e trata.
         await this.processEntradaDescription({
@@ -1126,7 +1126,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    payload: WahaMessagePayload
+    payload: IncomingMessage
   ): Promise<void> {
     const numeroOs = state.selectedNumeroProcedimento?.trim();
     if (state.selectedTipo !== MATERIAL_TIPO || !state.selectedEmpresaId || !numeroOs || !state.selectedObraNome) {
@@ -1189,7 +1189,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    payload: WahaMessagePayload
+    payload: IncomingMessage
   ): Promise<void> {
     const numeroOs = state.selectedNumeroProcedimento?.trim();
     if (
@@ -1312,12 +1312,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     userId: number;
     empresaId: bigint;
     obraId?: number | null;
-    payload: WahaMessagePayload;
+    payload: IncomingMessage;
     missingMessage: string;
     invalidMessage: string;
   }): Promise<string | null> {
     const media = input.payload.media;
-    if (!input.payload.hasMedia || !media?.url) {
+    if (!media?.ref) {
       await this.deps.messaging.sendText(input.chatId, input.missingMessage);
       return null;
     }
@@ -1329,12 +1329,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     }
 
     try {
-      const body = await this.deps.mediaDownloader.download(media.url);
+      const body = await this.deps.mediaDownloader.download(media.ref);
       const objectPath = buildStoragePath({
         empresaId: input.empresaId,
         userId: input.userId,
         obraId: input.obraId,
-        messageId: input.payload.id,
+        messageId: input.payload.messageId,
         filename: media.filename,
         contentType
       });

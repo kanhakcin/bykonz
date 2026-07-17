@@ -9,6 +9,9 @@ export class WahaClient implements MessagingClient, MediaDownloader {
   ) {}
 
   static fromConfig(config: AppConfig): WahaClient {
+    if (!config.wahaBaseUrl || !config.wahaApiKey || !config.wahaSession) {
+      throw new Error("WahaClient requires WAHA_BASE_URL, WAHA_API_KEY and WAHA_SESSION");
+    }
     return new WahaClient(config.wahaBaseUrl, config.wahaApiKey, config.wahaSession);
   }
 

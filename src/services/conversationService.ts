@@ -1,11 +1,7 @@
 import { createFlowRegistry, type FlowRegistry } from "../flows/registry";
 import type { ConversationServiceDeps, ConversationStateRecord, UserRecord } from "../flows/types";
-import type { WahaMessagePayload, WahaWebhook } from "../types/waha";
-import {
-  extractPhoneFromWahaPayload,
-  getWahaPhoneLookupCandidates,
-  readNestedString
-} from "../utils/phone";
+import type { IncomingMessage } from "../types/message";
+import { getWahaPhoneLookupCandidates } from "../utils/phone";
 
 export type {
   ConversationServiceDeps,
@@ -45,22 +41,18 @@ export class ConversationService {
     this.flowRegistry = createFlowRegistry(deps);
   }
 
-  async handleWebhook(webhook: WahaWebhook): Promise<void> {
-    if (!this.isSupportedWebhook(webhook)) {
-      return;
-    }
-
-    const payload = webhook.payload;
-    const chatId = payload.from ?? payload.chatId;
+  /**
+   * Recebe uma mensagem já normalizada (channel-agnóstica) pela borda de cada
+   * canal. Toda a especificidade de WAHA/Telegram (filtro de evento/fromMe,
+   * extração de telefone, resolução de file_id) vive nos adapters de entrada.
+   */
+  async handleWebhook(message: IncomingMessage): Promise<void> {
+    const chatId = message.chatId;
     if (!chatId) {
       return;
     }
 
-    if (this.isGroupChat(chatId)) {
-      return;
-    }
-
-    await this.withChatLock(chatId, () => this.processWebhook(chatId, webhook));
+    await this.withChatLock(chatId, () => this.processMessage(message));
   }
 
   private async withChatLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
@@ -81,34 +73,22 @@ export class ConversationService {
     }
   }
 
-  private async processWebhook(
-    chatId: string,
-    webhook: WahaWebhook & { payload: WahaMessagePayload }
-  ): Promise<void> {
-    const payload = webhook.payload;
-    const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
-    const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);
-    const phoneDebugFields = this.wahaPhoneDebugFields(payload);
-    this.logWahaDebug("WAHA webhook phone lookup started", {
-      event: webhook.event,
-      session: webhook.session,
+  private async processMessage(message: IncomingMessage): Promise<void> {
+    const chatId = message.chatId;
+    this.logChannelDebug("channel message received", {
+      channel: message.channel,
       chatId,
-      hasMedia: payload.hasMedia ?? false,
-      source: payload.source ?? null,
-      ...phoneDebugFields,
-      wahaPhoneDigits,
-      phoneLookupCandidates
+      hasMedia: message.media != null,
+      identityKind: message.identity.kind
     });
 
-    const user = await this.findUserByWahaPhone(phoneLookupCandidates);
+    const user = await this.resolveUser(message);
     if (!user) {
-      console.warn("WAHA phone lookup did not match a registered user", {
-        event: webhook.event,
-        session: webhook.session,
+      this.logChannelDebug("channel identity did not match a registered user", {
+        channel: message.channel,
         chatId,
-        ...phoneDebugFields,
-        wahaPhoneDigits,
-        phoneLookupCandidates
+        identityKind: message.identity.kind,
+        identityValue: message.identity.value
       });
       await this.deps.messaging.sendText(
         chatId,
@@ -118,17 +98,16 @@ export class ConversationService {
     }
 
     const phoneE164 = user.phoneE164;
-    this.logWahaDebug("WAHA phone lookup matched registered user", {
+    this.logChannelDebug("channel identity matched registered user", {
+      channel: message.channel,
       chatId,
-      wahaPhoneDigits,
-      phoneLookupCandidates,
       matchedPhoneE164: phoneE164,
       userId: user.id
     });
 
-    const text = (payload.body ?? "").trim();
+    const text = (message.text ?? "").trim();
     if (this.isResetCommand(text)) {
-      this.logWahaDebug("WAHA reset command received", {
+      this.logChannelDebug("reset command received", {
         chatId,
         phoneE164,
         userId: user.id,
@@ -139,19 +118,19 @@ export class ConversationService {
     }
 
     const loadedState = await this.deps.store.getState(chatId);
-    this.logWahaDebug("WAHA conversation state loaded", {
+    this.logChannelDebug("conversation state loaded", {
       chatId,
       phoneE164,
       userId: user.id,
       stateStep: loadedState?.stepKey ?? loadedState?.step ?? null,
       flowKey: loadedState?.flowKey ?? null,
-      hasMedia: payload.hasMedia ?? false,
+      hasMedia: message.media != null,
       textLength: text.length
     });
 
     if (!loadedState || this.isSessionExpired(loadedState)) {
       if (loadedState) {
-        this.logWahaDebug("WAHA conversation session expired", {
+        this.logChannelDebug("conversation session expired", {
           chatId,
           phoneE164,
           userId: user.id,
@@ -161,7 +140,7 @@ export class ConversationService {
       }
 
       const state = await this.createInitialState(chatId, phoneE164);
-      this.logWahaDebug("WAHA conversation state created", {
+      this.logChannelDebug("conversation state created", {
         chatId,
         phoneE164,
         userId: user.id,
@@ -175,7 +154,7 @@ export class ConversationService {
         user,
         state,
         text,
-        payload
+        payload: message
       });
       return;
     }
@@ -187,7 +166,7 @@ export class ConversationService {
       user,
       state: loadedState,
       text,
-      payload
+      payload: message
     });
   }
 
@@ -212,8 +191,18 @@ export class ConversationService {
     });
   }
 
-  private async findUserByWahaPhone(phoneLookupCandidates: string[]): Promise<UserRecord | null> {
-    for (const candidate of phoneLookupCandidates) {
+  /**
+   * Resolve o operador a partir da identidade crua do canal:
+   * - phone → candidatos BR (com/sem o 9) + findUserByPhone (WhatsApp);
+   * - telegram → findUserByTelegramId.
+   */
+  private async resolveUser(message: IncomingMessage): Promise<UserRecord | null> {
+    if (message.identity.kind === "telegram") {
+      return this.deps.store.findUserByTelegramId(message.identity.value);
+    }
+
+    const candidates = getWahaPhoneLookupCandidates(message.identity.value);
+    for (const candidate of candidates) {
       const user = await this.deps.store.findUserByPhone(candidate);
       if (user) {
         return user;
@@ -223,43 +212,10 @@ export class ConversationService {
     return null;
   }
 
-  private wahaPhoneDebugFields(payload: WahaMessagePayload): Record<string, string | null> {
-    return {
-      payloadFrom: payload.from ?? null,
-      payloadChatId: payload.chatId ?? null,
-      sender: readNestedString(payload, ["_data", "Info", "Sender"]) ?? readNestedString(payload, ["_data", "Sender"]) ?? null,
-      senderAlt:
-        readNestedString(payload, ["_data", "Info", "SenderAlt"]) ??
-        readNestedString(payload, ["_data", "SenderAlt"]) ??
-        null
-    };
-  }
-
-  private logWahaDebug(message: string, details: Record<string, unknown>): void {
-    if (isWahaDebugLoggingEnabled()) {
+  private logChannelDebug(message: string, details: Record<string, unknown>): void {
+    if (isChannelDebugLoggingEnabled()) {
       console.info(message, details);
     }
-  }
-
-  private isSupportedWebhook(webhook: WahaWebhook): webhook is WahaWebhook & { payload: WahaMessagePayload } {
-    if (webhook.event !== "message" && webhook.event !== "message.any") {
-      return false;
-    }
-
-    if (!webhook.payload) {
-      return false;
-    }
-
-    if (webhook.payload.fromMe || webhook.payload.source === "api") {
-      return false;
-    }
-
-    return true;
-  }
-
-  /** Grupos (ex. usados para o relatório automático) ficam em standby: o bot nunca responde lá, só recebe o PDF automático. */
-  private isGroupChat(chatId: string): boolean {
-    return chatId.endsWith("@g.us");
   }
 
   private isResetCommand(text: string): boolean {
@@ -276,7 +232,7 @@ export class ConversationService {
   }
 }
 
-function isWahaDebugLoggingEnabled(): boolean {
+function isChannelDebugLoggingEnabled(): boolean {
   const value = process.env.WAHA_DEBUG_LOGS?.toLowerCase();
   return value === "1" || value === "true" || value === "yes";
 }

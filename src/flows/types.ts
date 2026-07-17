@@ -1,4 +1,4 @@
-import type { WahaMessagePayload } from "../types/waha";
+import type { IncomingMessage } from "../types/message";
 
 export type FlowStep =
   | "MAIN_MENU"
@@ -24,6 +24,7 @@ export type FlowData = Record<string, unknown>;
 export interface UserRecord {
   id: number;
   phoneE164: string;
+  telegramUserId?: string | null;
   nome?: string | null;
 }
 
@@ -123,6 +124,7 @@ export interface ObraForReport {
 
 export interface ConversationStore {
   findUserByPhone(phoneDigits: string): Promise<UserRecord | null>;
+  findUserByTelegramId(telegramUserId: string): Promise<UserRecord | null>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
   findObrasAtivas(): Promise<ObraRecord[]>;
   getState(chatId: string): Promise<ConversationStateRecord | null>;
@@ -169,7 +171,11 @@ export interface MessagingClient {
 }
 
 export interface MediaDownloader {
-  download(url: string): Promise<Buffer>;
+  /**
+   * Baixa a mídia a partir de uma referência opaca do canal.
+   * WAHA: a URL. Telegram: o file_id.
+   */
+  download(ref: string): Promise<Buffer>;
 }
 
 export interface ObjectStorage {
@@ -224,7 +230,7 @@ export interface FlowHandleInput {
   user: UserRecord;
   state: ConversationStateRecord;
   text: string;
-  payload: WahaMessagePayload;
+  payload: IncomingMessage;
 }
 
 export interface FlowDefinition {

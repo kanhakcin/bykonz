@@ -1,11 +1,17 @@
 {
-  "short_name": "App",
-  "name": "Frontend Template",
+  "short_name": "Bykonz",
+  "name": "Services Bykonz",
+  "description": "Uma plataforma para acompanhar suas operações em qualquer setor — construção civil, naval, industrial e mais.",
   "icons": [
     {
       "src": "favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
       "type": "image/x-icon"
+    },
+    {
+      "src": "logo-icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
     },
     {
       "src": "logo192.png",
@@ -26,7 +32,7 @@
   ],
   "start_url": "/index.html",
   "display": "standalone",
-  "theme_color": "light",
+  "theme_color": "#1969a1",
   "background_color": "#ffffff",
   "prefer_related_applications": "false"
 }

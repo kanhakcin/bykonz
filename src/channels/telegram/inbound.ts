@@ -1,4 +1,4 @@
-import type { IncomingMediaRef, IncomingMessage } from "../../types/message";
+import type { IncomingMediaRef, IncomingMessage, SharedContact } from "../../types/message";
 import type { TelegramMessage, TelegramUpdate } from "../../types/telegram";
 
 /** Prefixo de namespacing do chatId Telegram (ver §4 do plano). */
@@ -36,7 +36,25 @@ export function telegramUpdateToIncomingMessage(update: TelegramUpdate): Incomin
       kind: "telegram",
       value: String(from.id),
       raw: from as unknown as Record<string, unknown>
-    }
+    },
+    sharedContact: extractSharedContact(message)
+  };
+}
+
+function extractSharedContact(message: TelegramMessage): SharedContact | null {
+  const contact = message.contact;
+  if (!contact) {
+    return null;
+  }
+
+  // O Telegram só preenche `user_id` (e igual ao `from.id`) quando o contato é
+  // o do próprio remetente, compartilhado via botão request_contact. Contato de
+  // terceiro encaminhado não tem esse vínculo — não deve auto-vincular acesso.
+  const belongsToSender = contact.user_id != null && message.from != null && contact.user_id === message.from.id;
+
+  return {
+    phone: contact.phone_number,
+    belongsToSender
   };
 }
 

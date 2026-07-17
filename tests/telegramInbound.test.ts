@@ -25,7 +25,8 @@ describe("telegramUpdateToIncomingMessage", () => {
       messageId: "100",
       text: "menu",
       media: null,
-      identity: { kind: "telegram", value: "777", raw: expect.any(Object) }
+      identity: { kind: "telegram", value: "777", raw: expect.any(Object) },
+      sharedContact: null
     });
   });
 
@@ -61,6 +62,25 @@ describe("telegramUpdateToIncomingMessage", () => {
       mimetype: "application/pdf",
       filename: "relatorio.pdf"
     });
+  });
+
+  it("extracts a shared contact belonging to the sender", () => {
+    const msg = telegramUpdateToIncomingMessage(
+      baseMessage({ contact: { phone_number: "+5547996222708", user_id: 777 } })
+    );
+    expect(msg?.sharedContact).toEqual({ phone: "+5547996222708", belongsToSender: true });
+  });
+
+  it("flags a shared contact that is not the sender's own", () => {
+    const msg = telegramUpdateToIncomingMessage(
+      baseMessage({ contact: { phone_number: "+5547996222708", user_id: 999 } })
+    );
+    expect(msg?.sharedContact).toEqual({ phone: "+5547996222708", belongsToSender: false });
+  });
+
+  it("has no sharedContact on a plain text message", () => {
+    const msg = telegramUpdateToIncomingMessage(baseMessage({ text: "oi" }));
+    expect(msg?.sharedContact).toBeNull();
   });
 
   it("ignores updates without a message", () => {

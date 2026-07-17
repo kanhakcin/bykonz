@@ -12,6 +12,7 @@ function makeStore(overrides: Partial<ConversationStore> = {}): ConversationStor
   return {
     findUserByPhone: async () => null,
     findUserByTelegramId: async () => null,
+    linkTelegramIdByPhone: async () => ({ user: null, alreadyLinked: false }),
     findEmpresasByUser: async () => [],
     findObrasAtivas: async () => [],
     getState: async () => null,

@@ -67,6 +67,26 @@ class FakeStore implements ConversationStore {
     return this.usersByTelegramId.get(telegramUserId) ?? null;
   }
 
+  async linkTelegramIdByPhone(input: {
+    phoneCandidates: string[];
+    telegramUserId: string;
+  }): Promise<{ user: UserRecord | null; alreadyLinked: boolean }> {
+    for (const candidate of input.phoneCandidates) {
+      const user = this.users.get(candidate);
+      if (!user) {
+        continue;
+      }
+      if (user.telegramUserId && user.telegramUserId !== input.telegramUserId) {
+        return { user: null, alreadyLinked: true };
+      }
+      const linked = { ...user, telegramUserId: input.telegramUserId };
+      this.users.set(candidate, linked);
+      this.usersByTelegramId.set(input.telegramUserId, linked);
+      return { user: linked, alreadyLinked: false };
+    }
+    return { user: null, alreadyLinked: false };
+  }
+
   async findEmpresasByUser(userId: number): Promise<EmpresaRecord[]> {
     return this.empresasByUser.get(userId) ?? [];
   }

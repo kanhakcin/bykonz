@@ -4,6 +4,7 @@ import type { IncomingMessage } from "../types/message";
 import { getWahaPhoneLookupCandidates } from "../utils/phone";
 
 export type {
+  ChannelOnboarding,
   ConversationServiceDeps,
   ConversationStateRecord,
   ConversationStore,
@@ -79,8 +80,16 @@ export class ConversationService {
       channel: message.channel,
       chatId,
       hasMedia: message.media != null,
+      hasSharedContact: message.sharedContact != null,
       identityKind: message.identity.kind
     });
+
+    // Onboarding do Telegram: o operador compartilhou o telefone para auto-
+    // vincular o telegramUserId. Tratado antes da resolução de identidade.
+    if (message.sharedContact && message.identity.kind === "telegram") {
+      await this.handleSharedContact(chatId, message.identity.value, message.sharedContact);
+      return;
+    }
 
     const user = await this.resolveUser(message);
     if (!user) {
@@ -90,6 +99,12 @@ export class ConversationService {
         identityKind: message.identity.kind,
         identityValue: message.identity.value
       });
+      // No Telegram, o bot não conhece o telefone do operador; em vez de só
+      // recusar, oferece o botão de compartilhar contato para auto-vínculo.
+      if (message.identity.kind === "telegram" && this.deps.channelOnboarding) {
+        await this.deps.channelOnboarding.promptShareContact(chatId);
+        return;
+      }
       await this.deps.messaging.sendText(
         chatId,
         "Numero nao cadastrado. Fale com o administrador para liberar o acesso."
@@ -210,6 +225,80 @@ export class ConversationService {
     }
 
     return null;
+  }
+
+  /**
+   * Auto-vínculo do Telegram: casa o telefone compartilhado com um operador
+   * cadastrado e grava o telegramUserId. Só vincula se o contato for do próprio
+   * remetente e o operador ainda não tiver Telegram vinculado.
+   */
+  private async handleSharedContact(
+    chatId: string,
+    telegramUserId: string,
+    contact: { phone: string; belongsToSender: boolean }
+  ): Promise<void> {
+    // Se o operador já está vinculado (mandou o contato de novo), só confirma.
+    const existing = await this.deps.store.findUserByTelegramId(telegramUserId);
+    if (existing) {
+      await this.finishOnboarding(chatId, existing.nome);
+      return;
+    }
+
+    if (!contact.belongsToSender) {
+      this.logChannelDebug("shared contact rejected: not the sender's own contact", { chatId });
+      await this.deps.messaging.sendText(
+        chatId,
+        "⚠️ Compartilhe o seu próprio contato usando o botão para vincular seu acesso."
+      );
+      return;
+    }
+
+    const phoneDigits = contact.phone.replace(/\D/g, "");
+    const phoneCandidates = getWahaPhoneLookupCandidates(phoneDigits);
+
+    const { user, alreadyLinked } = await this.deps.store.linkTelegramIdByPhone({
+      phoneCandidates,
+      telegramUserId
+    });
+
+    if (alreadyLinked) {
+      // O operador (por telefone) já tinha OUTRO telegramUserId vinculado.
+      this.logChannelDebug("shared contact matched a user already linked to another telegram id", {
+        chatId
+      });
+      await this.deps.messaging.sendText(
+        chatId,
+        "Este cadastro ja esta vinculado a outra conta do Telegram. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (!user) {
+      this.logChannelDebug("shared contact did not match a registered user", {
+        chatId,
+        phoneCandidates
+      });
+      await this.deps.messaging.sendText(
+        chatId,
+        "Seu telefone nao esta cadastrado. Fale com o administrador para liberar o acesso."
+      );
+      return;
+    }
+
+    this.logChannelDebug("shared contact linked telegram id to user", {
+      chatId,
+      userId: user.id,
+      telegramUserId
+    });
+    await this.finishOnboarding(chatId, user.nome);
+  }
+
+  private async finishOnboarding(chatId: string, userName?: string | null): Promise<void> {
+    if (this.deps.channelOnboarding) {
+      await this.deps.channelOnboarding.confirmContactLinked(chatId, userName);
+      return;
+    }
+    await this.deps.messaging.sendText(chatId, "✅ Acesso vinculado! Digite *menu* para começar.");
   }
 
   private logChannelDebug(message: string, details: Record<string, unknown>): void {

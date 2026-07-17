@@ -23,6 +23,29 @@ describe("TelegramClient", () => {
     });
   });
 
+  it("sends a message with a request_contact keyboard via reply_markup", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new TelegramClient(TOKEN);
+    await client.sendMessage(`${TELEGRAM_CHAT_PREFIX}555`, "compartilhe", {
+      keyboard: [[{ text: "📱 Compartilhar", request_contact: true }]],
+      resize_keyboard: true,
+      one_time_keyboard: true
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      chat_id: "555",
+      text: "compartilhe",
+      reply_markup: {
+        keyboard: [[{ text: "📱 Compartilhar", request_contact: true }]],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      }
+    });
+  });
+
   it("sends a document via multipart sendDocument", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

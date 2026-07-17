@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env";
 import type { MediaDownloader, MessagingClient } from "../services/conversationService";
-import type { TelegramFile } from "../types/telegram";
+import type { TelegramFile, TelegramReplyMarkup } from "../types/telegram";
 import { TELEGRAM_CHAT_PREFIX } from "../channels/telegram/inbound";
 
 /**
@@ -28,12 +28,21 @@ export class TelegramClient implements MessagingClient, MediaDownloader {
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
+    await this.sendMessage(chatId, text);
+  }
+
+  /**
+   * sendMessage com `reply_markup` opcional — usado pelo onboarding para
+   * mostrar/remover o botão de compartilhar contato.
+   */
+  async sendMessage(chatId: string, text: string, replyMarkup?: TelegramReplyMarkup): Promise<void> {
     const response = await fetch(`${this.apiBase}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: stripPrefix(chatId),
-        text
+        text,
+        reply_markup: replyMarkup
       })
     });
 

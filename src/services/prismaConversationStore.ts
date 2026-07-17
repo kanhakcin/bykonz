@@ -46,6 +46,49 @@ export class PrismaConversationStore implements ConversationStore {
     };
   }
 
+  async linkTelegramIdByPhone(input: {
+    phoneCandidates: string[];
+    telegramUserId: string;
+  }): Promise<{ user: UserRecord | null; alreadyLinked: boolean }> {
+    // Resolve o operador testando os candidatos de telefone (com/sem o 9º dígito).
+    let matched: { id: number; phoneE164: string; name: string | null; telegramUserId: string | null } | null = null;
+    for (const candidate of input.phoneCandidates) {
+      const phoneE164 = phoneDigitsToE164(candidate);
+      if (!phoneE164) {
+        continue;
+      }
+      const user = await this.prisma.user.findUnique({ where: { phoneE164 } });
+      if (user && user.active) {
+        matched = { id: user.id, phoneE164: user.phoneE164, name: user.name, telegramUserId: user.telegramUserId };
+        break;
+      }
+    }
+
+    if (!matched) {
+      return { user: null, alreadyLinked: false };
+    }
+
+    // Não sobrescreve um vínculo existente (evita sequestro por telefone repetido).
+    if (matched.telegramUserId && matched.telegramUserId !== input.telegramUserId) {
+      return { user: null, alreadyLinked: true };
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: matched.id },
+      data: { telegramUserId: input.telegramUserId }
+    });
+
+    return {
+      user: {
+        id: updated.id,
+        phoneE164: updated.phoneE164.replace(/^\+/, ""),
+        telegramUserId: updated.telegramUserId,
+        nome: updated.name
+      },
+      alreadyLinked: false
+    };
+  }
+
   async findUserByTelegramId(telegramUserId: string): Promise<UserRecord | null> {
     if (!telegramUserId) {
       return null;

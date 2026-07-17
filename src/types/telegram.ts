@@ -32,6 +32,14 @@ export interface TelegramDocument {
   file_size?: number;
 }
 
+export interface TelegramContact {
+  phone_number: string;
+  first_name?: string;
+  last_name?: string;
+  /** Presente quando o contato compartilhado é uma conta do Telegram. */
+  user_id?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
@@ -41,7 +49,27 @@ export interface TelegramMessage {
   caption?: string;
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
+  contact?: TelegramContact;
 }
+
+/** Botão de teclado que pede o telefone do usuário (request_contact). */
+export interface TelegramKeyboardButton {
+  text: string;
+  request_contact?: boolean;
+}
+
+export interface TelegramReplyKeyboardMarkup {
+  keyboard: TelegramKeyboardButton[][];
+  resize_keyboard?: boolean;
+  one_time_keyboard?: boolean;
+}
+
+/** Remove um teclado customizado, voltando ao teclado padrão. */
+export interface TelegramReplyKeyboardRemove {
+  remove_keyboard: true;
+}
+
+export type TelegramReplyMarkup = TelegramReplyKeyboardMarkup | TelegramReplyKeyboardRemove;
 
 export interface TelegramUpdate {
   update_id: number;

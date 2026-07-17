@@ -8,3 +8,6 @@ coverage/
 *.log
 .claude/
 .waha-sessions/
+
+# Config de backup com segredos (mantém só o .example versionado)
+ops/backup/backup.env

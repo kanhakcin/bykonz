@@ -6,8 +6,10 @@ import {
   type CreateEntradaInput,
   type CreateTreinamentoInput,
   type EmpresaRecord,
+  type EntradaForGroupForward,
   type EntradaForReport,
   type MessagingClient,
+  type NormaRecord,
   type ObjectStorage,
   type ObraForReport,
   type ObraRecord,
@@ -48,6 +50,16 @@ class FakeStore implements ConversationStore {
   users = new Map<string, UserRecord>();
   empresasByUser = new Map<number, EmpresaRecord[]>();
   obras: ObraRecord[] = [{ id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" }];
+  normasByObra = new Map<number, NormaRecord[]>([
+    [
+      1,
+      [
+        { code: "PS-008", title: "Execução de alvenaria tradicional" },
+        { code: "PS-031", title: "Impermeabilização de lajes" },
+        { code: "PS-045", title: "Concretagem de estruturas" }
+      ]
+    ]
+  ]);
   states = new Map<string, ConversationStateRecord>();
   entradas: Array<CreateEntradaInput & { id: bigint }> = [];
   treinamentos: Array<CreateTreinamentoInput & { id: number; entradaId: bigint }> = [];
@@ -93,6 +105,10 @@ class FakeStore implements ConversationStore {
 
   async findObrasAtivas(): Promise<ObraRecord[]> {
     return this.obras;
+  }
+
+  async findNormasForObra(obraId: number): Promise<NormaRecord[]> {
+    return this.normasByObra.get(obraId) ?? [];
   }
 
   async getState(chatId: string): Promise<ConversationStateRecord | null> {
@@ -170,6 +186,21 @@ class FakeStore implements ConversationStore {
 
   async findEntradasForObraDay(_input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]> {
     return this.reportEntradas;
+  }
+
+  async findEntradaForGroupForward(entradaId: bigint): Promise<EntradaForGroupForward | null> {
+    const entrada = this.entradas.find((e) => e.id === entradaId);
+    if (!entrada) {
+      return null;
+    }
+    const usuario = [...this.users.values()].find((u) => u.id === entrada.userId) ?? null;
+    return {
+      description: entrada.description,
+      tipoServico: entrada.tipoServico ?? null,
+      numeroProcedimento: entrada.numeroProcedimento ?? null,
+      usuarioNome: usuario?.nome ?? null,
+      mediaUrls: this.media.filter((m) => m.entradaId === entradaId).map((m) => m.mediaUrl)
+    };
   }
 
   async findObraById(obraId: number): Promise<ObraForReport | null> {
@@ -820,7 +851,7 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Não entendi");
   });
 
-  it("asks service type then goes straight to the photo, taking the procedure from the description", async () => {
+  it("lists the sector norms and takes the procedure from the chosen norm", async () => {
     const { service, store, messaging, storage } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
@@ -833,25 +864,27 @@ describe("ConversationService", () => {
       selectedEmpresaId: 10n,
       selectedObraId: 1
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Qual o tipo de serviço?");
+    // O menu agora lista as normas do setor da obra (código + título), não os tipos.
+    expect(messaging.messages.at(-1)?.text).toContain("Qual a norma do serviço?");
+    expect(messaging.messages.at(-1)?.text).toContain("1) PS-008 - Execução de alvenaria tradicional");
+    expect(messaging.messages.at(-1)?.text).toContain("2) PS-031 - Impermeabilização de lajes");
+    // "Outros" (foto sem norma) é sempre a última opção.
+    expect(messaging.messages.at(-1)?.text).toContain("4) Outros");
 
-    // Após escolher o tipo de serviço vai direto para a foto — sem perguntar o procedimento.
+    // Escolher a norma define tipo de serviço (título) e procedimento (código) e vai direto para a foto.
     await deliverWaha(service, textWebhook("2"));
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_PHOTO",
-      selectedTipoServico: "Hidráulica",
-      selectedNumeroProcedimento: null
+      selectedTipoServico: "Impermeabilização de lajes",
+      selectedNumeroProcedimento: "PS-031"
     });
     expect(messaging.messages.at(-1)?.text).toContain("Obra: Obra Residencial Aurora");
-    expect(messaging.messages.at(-1)?.text).toContain("Hidráulica");
+    expect(messaging.messages.at(-1)?.text).toContain("PS-031 - Impermeabilização de lajes");
     expect(messaging.messages.at(-1)?.text).toContain("envie uma foto");
-    // Não faz mais a pergunta dedicada do procedimento antes da foto.
-    expect(messaging.messages.at(-1)?.text).not.toContain("Qual o número do procedimento");
-    expect(messaging.messages.at(-1)?.text).not.toContain("Faltou você informar");
 
     await deliverWaha(service, photoWebhook());
-    // A descrição traz o código do procedimento (PS-031) — o sistema aceita e conclui.
-    await deliverWaha(service, textWebhook("Parede norte concretada (PS-031)"));
+    // A descrição é livre; o procedimento já veio da norma.
+    await deliverWaha(service, textWebhook("Parede norte impermeabilizada"));
 
     expect(storage.uploads).toHaveLength(1);
     expect(storage.uploads[0].path).toContain("entradas/10/obras/1/");
@@ -861,20 +894,256 @@ describe("ConversationService", () => {
         empresaId: 10n,
         obraId: 1,
         tipo: "Inspecao de servico",
-        tipoServico: "Hidráulica",
-        description: "Parede norte concretada (PS-031)"
+        tipoServico: "Impermeabilização de lajes",
+        numeroProcedimento: "PS-031",
+        description: "Parede norte impermeabilizada"
       }
     ]);
     expect(store.media[0].mediaUrl).toBe(storage.uploads[0].path);
+    // Norma preservada no state para permitir fotos em sequência.
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_POST_SAVE_CHOICE",
-      selectedObraId: 1
+      selectedObraId: 1,
+      selectedTipoServico: "Impermeabilização de lajes",
+      selectedNumeroProcedimento: "PS-031"
     });
     expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
-    expect(messaging.messages.at(-1)?.text).toContain("Incluir outro registro");
+    // Menu de sequência: norma atual + trocar de norma.
+    expect(messaging.messages.at(-1)?.text).toContain("Norma atual: PS-031 - Impermeabilização de lajes");
+    expect(messaging.messages.at(-1)?.text).toContain("Trocar de norma");
   });
 
-  it("asks for the procedure number only when the description does not contain a code", async () => {
+  it("permite mandar mais fotos da mesma norma em sequência, sem reescolher", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1")); // norma PS-008
+    // 1ª foto (com legenda para concluir direto)
+    await deliverWaha(service, photoWebhook("photo-1", "foto1.jpg", "Fiada 1"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+
+    // 2ª foto direto no pós-registro: entra na MESMA norma, sem reescolher.
+    await deliverWaha(service, photoWebhook("photo-2", "foto2.jpg", "Fiada 2"));
+    // 3ª foto idem.
+    await deliverWaha(service, photoWebhook("photo-3", "foto3.jpg", "Fiada 3"));
+
+    expect(storage.uploads).toHaveLength(3);
+    expect(store.entradas).toHaveLength(3);
+    // Todas as 3 na mesma norma PS-008.
+    for (const entrada of store.entradas) {
+      expect(entrada).toMatchObject({
+        tipo: "Inspecao de servico",
+        tipoServico: "Execução de alvenaria tradicional",
+        numeroProcedimento: "PS-008"
+      });
+    }
+    expect(store.entradas.map((e) => e.description)).toEqual(["Fiada 1", "Fiada 2", "Fiada 3"]);
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+  });
+
+  it("aceita foto em sequência mesmo sem legenda (pede descrição e conclui)", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1")); // norma PS-008
+    await deliverWaha(service, photoWebhook("photo-1", "foto1.jpg", "Fiada 1"));
+
+    // 2ª foto sem legenda: volta a pedir descrição, preservando a norma.
+    await deliverWaha(service, photoWebhook("photo-2", "foto2.jpg"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_DESCRIPTION");
+    await deliverWaha(service, textWebhook("Fiada 2 sem legenda"));
+
+    expect(store.entradas).toHaveLength(2);
+    expect(store.entradas[1]).toMatchObject({
+      numeroProcedimento: "PS-008",
+      description: "Fiada 2 sem legenda"
+    });
+  });
+
+  it("troca de norma pela opção 1 no menu pós-registro", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1")); // norma PS-008
+    await deliverWaha(service, photoWebhook("photo-1", "foto1.jpg", "Fiada 1"));
+
+    // "1" = trocar de norma -> reabre o menu de normas.
+    await deliverWaha(service, textWebhook("1"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_SERVICE_TYPE");
+    expect(messaging.messages.at(-1)?.text).toContain("Qual a norma do serviço?");
+
+    // Escolhe outra norma e segue normalmente.
+    await deliverWaha(service, textWebhook("2")); // PS-031
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PHOTO",
+      selectedNumeroProcedimento: "PS-031"
+    });
+  });
+
+  it("volta ao menu principal pela opção 2 no pós-registro da inspeção", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, photoWebhook("photo-1", "foto1.jpg", "Fiada 1"));
+
+    await deliverWaha(service, textWebhook("2"));
+    expect(store.states.get(CHAT_ID)?.step).toBe("MAIN_MENU");
+    expect(messaging.messages.at(-1)?.text).toContain("O que voce quer fazer agora?");
+  });
+
+  it("encaminha a foto da inspeção para o grupo de WhatsApp da obra com a legenda certa", async () => {
+    const { service, store, messaging, storage } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    // Obra 1 tem grupo de WhatsApp cadastrado.
+    store.obrasForReport = [
+      {
+        id: 1,
+        nome: "Obra Residencial Aurora",
+        codigo: "130",
+        construtoraNome: "Construtora Tanen",
+        whatsappGroupId: "123@g.us",
+        whatsappAutoReportEnabled: false,
+        status: "ACTIVE"
+      }
+    ];
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1")); // norma PS-008
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Parede norte levantada"));
+
+    // A cópia foi enviada ao grupo (via sendFile) — não confundir com as mensagens de texto do privado.
+    expect(messaging.files).toHaveLength(1);
+    const enviado = messaging.files[0];
+    expect(enviado.chatId).toBe("123@g.us");
+    expect(enviado.file.mimetype).toBe("image/jpeg");
+    // O corpo veio do storage (download), reencaminhado em base64.
+    expect(enviado.file.data).toBe((await storage.downloadPrivateObject(storage.uploads[0].path)).toString("base64"));
+    // Legenda: descrição / norma / usuário - obra.
+    expect(enviado.caption).toBe(
+      "Parede norte levantada\nPS-008 - Execução de alvenaria tradicional\nUsuario Teste - Obra Residencial Aurora"
+    );
+    // O registro seguiu normalmente.
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+  });
+
+  it("não encaminha para o grupo quando a obra não tem grupo cadastrado", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    // findObraById retorna null (obrasForReport vazio) -> sem grupo.
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Parede norte levantada"));
+
+    expect(messaging.files).toHaveLength(0);
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+  });
+
+  it("conclui o registro mesmo se o envio para o grupo falhar", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    store.obrasForReport = [
+      {
+        id: 1,
+        nome: "Obra Residencial Aurora",
+        codigo: "130",
+        construtoraNome: "Construtora Tanen",
+        whatsappGroupId: "123@g.us",
+        whatsappAutoReportEnabled: false,
+        status: "ACTIVE"
+      }
+    ];
+    // WAHA fora: sendFile lança. O registro não pode quebrar por isso.
+    messaging.sendFile = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Parede norte levantada"));
+
+    expect(store.entradas).toHaveLength(1);
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+    expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
+  });
+
+  it("não encaminha para o grupo registros que não são inspeção de serviço", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    store.obrasForReport = [
+      {
+        id: 1,
+        nome: "Obra Residencial Aurora",
+        codigo: "130",
+        construtoraNome: "Construtora Tanen",
+        whatsappGroupId: "123@g.us",
+        whatsappAutoReportEnabled: false,
+        status: "ACTIVE"
+      }
+    ];
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("2")); // Abrir nao conformidade
+    await deliverWaha(service, textWebhook("2")); // incluir (1 = consulta)
+    await deliverWaha(service, textWebhook("1")); // norma
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Fissura na viga"));
+
+    expect(store.entradas).toMatchObject([{ tipo: "Abrir nao conformidade" }]);
+    // Só inspeção de serviço é copiada para o grupo.
+    expect(messaging.files).toHaveLength(0);
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+  });
+
+  it("usa a legenda com 'Outros' quando a inspeção foi registrada sem norma", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    store.obrasForReport = [
+      {
+        id: 1,
+        nome: "Obra Residencial Aurora",
+        codigo: "130",
+        construtoraNome: "Construtora Tanen",
+        whatsappGroupId: "123@g.us",
+        whatsappAutoReportEnabled: false,
+        status: "ACTIVE"
+      }
+    ];
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("4")); // Outros (3 normas + Outros)
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Foto do canteiro"));
+
+    expect(messaging.files).toHaveLength(1);
+    expect(messaging.files[0].caption).toBe("Foto do canteiro\nOutros\nUsuario Teste - Obra Residencial Aurora");
+  });
+
+  it("concludes even when the description does not contain a code, since the norm defines the procedure", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
@@ -883,17 +1152,8 @@ describe("ConversationService", () => {
     await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, textWebhook("2"));
     await deliverWaha(service, photoWebhook());
-    // Descrição sem código de procedimento.
+    // Descrição sem código de procedimento: não pergunta mais nada, o código veio da norma.
     await deliverWaha(service, textWebhook("Parede norte concretada"));
-
-    expect(store.states.get(CHAT_ID)).toMatchObject({
-      step: "AWAITING_PROCEDURE_NUMBER",
-      pendingEntradaId: 1n
-    });
-    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
-
-    // Usuário informa o número no fallback — vira o procedureNumber do registro.
-    await deliverWaha(service, textWebhook("PS-031"));
 
     expect(store.entradas).toMatchObject([
       {
@@ -902,6 +1162,7 @@ describe("ConversationService", () => {
       }
     ]);
     expect(store.states.get(CHAT_ID)).toMatchObject({ step: "AWAITING_POST_SAVE_CHOICE" });
+    expect(messaging.messages.at(-1)?.text).not.toContain("Faltou você informar o número do procedimento");
     expect(messaging.messages.at(-1)?.text).toContain("Registro salvo");
   });
 
@@ -967,7 +1228,7 @@ describe("ConversationService", () => {
       step: "AWAITING_POST_SAVE_CHOICE",
       pendingEntradaId: null
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Incluir outro registro");
+    expect(messaging.messages.at(-1)?.text).toContain("Trocar de norma");
   });
 
   it("still asks for a description when the image has no caption", async () => {
@@ -984,7 +1245,7 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("me conta o que foi feito");
   });
 
-  it("asks for the procedure number when the caption has no code", async () => {
+  it("concludes with a caption that has no code, taking the procedure from the norm", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
@@ -994,12 +1255,15 @@ describe("ConversationService", () => {
     await deliverWaha(service, textWebhook("2"));
     await deliverWaha(service, photoWebhook("photo-1", "foto.jpg", "Parede norte concretada"));
 
-    expect(store.entradas).toMatchObject([{ description: "Parede norte concretada" }]);
+    expect(store.entradas).toMatchObject([
+      { description: "Parede norte concretada", numeroProcedimento: "PS-031" }
+    ]);
     expect(store.states.get(CHAT_ID)).toMatchObject({
-      step: "AWAITING_PROCEDURE_NUMBER",
-      pendingEntradaId: 1n
+      step: "AWAITING_POST_SAVE_CHOICE",
+      pendingEntradaId: null
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
+    expect(messaging.messages.at(-1)?.text).not.toContain("Faltou você informar o número do procedimento");
+    expect(messaging.messages.at(-1)?.text).toContain("Trocar de norma");
   });
 
   it("asks which obra to work on before showing the main menu when there are multiple", async () => {
@@ -1081,14 +1345,15 @@ describe("ConversationService", () => {
       { id: 1, nome: "Obra Residencial Aurora", codigo: "AUR" },
       { id: 4, nome: "Obra Boulevard", codigo: "BSV" }
     ];
+    store.normasByObra.set(4, [{ code: "PS-001", title: "Compactação de aterro" }]);
 
     await deliverWaha(service, textWebhook("oi"));
     await deliverWaha(service, textWebhook("2"));
     await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, textWebhook("1"));
-    await deliverWaha(service, textWebhook("6"));
+    await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, photoWebhook());
-    await deliverWaha(service, textWebhook("Concretagem da laje 14 (PS-001)"));
+    await deliverWaha(service, textWebhook("Compactação do aterro trecho 3"));
 
     expect(store.entradas).toMatchObject([
       {
@@ -1096,8 +1361,9 @@ describe("ConversationService", () => {
         empresaId: 10n,
         obraId: 4,
         tipo: "Inspecao de servico",
-        tipoServico: "Concretagem",
-        description: "Concretagem da laje 14 (PS-001)"
+        tipoServico: "Compactação de aterro",
+        numeroProcedimento: "PS-001",
+        description: "Compactação do aterro trecho 3"
       }
     ]);
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -1261,13 +1527,14 @@ describe("ConversationService", () => {
     expect(messaging.messages.at(-1)?.text).toContain("Isso nao e uma foto");
   });
 
-  it("re-shows the service type menu after an invalid service option", async () => {
+  it("re-shows the norm menu after an invalid norm option", async () => {
     const { service, store, messaging } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await deliverWaha(service, textWebhook("oi"));
     await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, textWebhook("1"));
+    // Só há 3 normas cadastradas; a opção 8 é inválida.
     await deliverWaha(service, textWebhook("8"));
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
@@ -1275,30 +1542,66 @@ describe("ConversationService", () => {
       selectedTipo: "Inspecao de servico",
       selectedEmpresaId: 10n
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Não entendi. Digite um numero de 1 a 7.");
+    expect(messaging.messages.at(-1)?.text).toContain("Digite o numero da norma na lista acima");
   });
 
-  it("re-prompts when the procedure number is blank in the fallback step", async () => {
-    const { service, store, messaging } = createHarness();
+  it("registra a foto sem norma quando o usuário escolhe Outros", async () => {
+    const { service, store, messaging, storage } = createHarness();
     store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
 
     await deliverWaha(service, textWebhook("oi"));
     await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, textWebhook("1"));
+    // O menu tem 3 normas; "Outros" é a opção seguinte (4).
+    expect(messaging.messages.at(-1)?.text).toContain("4) Outros");
+
     await deliverWaha(service, textWebhook("4"));
-    await deliverWaha(service, photoWebhook());
-    // Descrição sem código -> cai no fallback pedindo o procedimento.
-    await deliverWaha(service, textWebhook("Limpeza do canteiro"));
-    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_PROCEDURE_NUMBER");
-
-    // Resposta em branco no fallback deve repetir a pergunta.
-    await deliverWaha(service, textWebhook("   "));
-
     expect(store.states.get(CHAT_ID)).toMatchObject({
-      step: "AWAITING_PROCEDURE_NUMBER",
-      selectedTipoServico: "Organização e Limpeza"
+      step: "AWAITING_PHOTO",
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Faltou você informar o número do procedimento");
+    expect(messaging.messages.at(-1)?.text).toContain("Norma: Outros");
+
+    await deliverWaha(service, photoWebhook());
+    await deliverWaha(service, textWebhook("Foto do canteiro"));
+
+    expect(storage.uploads).toHaveLength(1);
+    expect(store.entradas).toMatchObject([
+      {
+        tipo: "Inspecao de servico",
+        tipoServico: null,
+        numeroProcedimento: null,
+        description: "Foto do canteiro"
+      }
+    ]);
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
+  });
+
+  it("mostra o menu só com Outros quando o setor da obra não tem normas", async () => {
+    const { service, store, messaging } = createHarness();
+    store.empresasByUser.set(7, [{ id: 10n, nome: "Obra Centro" }]);
+    // Obra 1 sem normas cadastradas.
+    store.normasByObra.set(1, []);
+
+    await deliverWaha(service, textWebhook("oi"));
+    await deliverWaha(service, textWebhook("1"));
+    await deliverWaha(service, textWebhook("1"));
+
+    expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_SERVICE_TYPE");
+    const menu = messaging.messages.at(-1)?.text ?? "";
+    expect(menu).toContain("Qual a norma do serviço?");
+    // Sem normas: "Outros" é a única opção (1).
+    expect(menu).toContain("1) Outros");
+    expect(menu).not.toContain("2) ");
+
+    // Escolher "Outros" registra sem norma.
+    await deliverWaha(service, textWebhook("1"));
+    expect(store.states.get(CHAT_ID)).toMatchObject({
+      step: "AWAITING_PHOTO",
+      selectedTipoServico: null,
+      selectedNumeroProcedimento: null
+    });
   });
 
   it("responds to the user when photo processing fails", async () => {
@@ -1312,13 +1615,13 @@ describe("ConversationService", () => {
     await deliverWaha(service, textWebhook("oi"));
     await deliverWaha(service, textWebhook("1"));
     await deliverWaha(service, textWebhook("1"));
-    await deliverWaha(service, textWebhook("6"));
+    await deliverWaha(service, textWebhook("3"));
     await deliverWaha(service, photoWebhook());
 
     expect(store.states.get(CHAT_ID)).toMatchObject({
       step: "AWAITING_PHOTO",
-      selectedTipoServico: "Concretagem",
-      selectedNumeroProcedimento: null
+      selectedTipoServico: "Concretagem de estruturas",
+      selectedNumeroProcedimento: "PS-045"
     });
     expect(messaging.messages.at(-1)?.text).toContain("Deu um problema pra salvar a foto");
   });
@@ -1344,7 +1647,7 @@ describe("ConversationService", () => {
       step: "AWAITING_SERVICE_TYPE",
       selectedEmpresaId: 20n
     });
-    expect(messaging.messages.at(-1)?.text).toContain("Qual o tipo de serviço?");
+    expect(messaging.messages.at(-1)?.text).toContain("Qual a norma do serviço?");
   });
 
   it("resets the flow from any step while keeping the active obra", async () => {
@@ -1578,35 +1881,39 @@ describe("ConversationService", () => {
 
   it("keeps the session when the last message was under 1 hour ago", async () => {
     const { service, store } = createHarness();
-    // Entrada já criada, aguardando o procedimento no passo de fallback.
+    // Entrada e foto já criadas; aguardando apenas a descrição.
     store.entradas.push({
       id: 1n,
       userId: 7,
       empresaId: 10n,
       obraId: 1,
       tipo: "Inspecao de servico",
-      tipoServico: "Alvenaria",
-      numeroProcedimento: null,
-      description: "Parede norte concretada"
+      tipoServico: "Execução de alvenaria tradicional",
+      numeroProcedimento: "PS-008",
+      description: ""
     });
     store.states.set(CHAT_ID, {
       chatId: CHAT_ID,
       phoneE164: PHONE,
-      step: "AWAITING_PROCEDURE_NUMBER",
-      stepKey: "AWAITING_PROCEDURE_NUMBER",
+      step: "AWAITING_DESCRIPTION",
+      stepKey: "AWAITING_DESCRIPTION",
       selectedObraId: 1,
       selectedObraNome: "Obra Residencial Aurora",
       selectedTipo: "Inspecao de servico",
       selectedEmpresaId: 10n,
-      selectedTipoServico: "Alvenaria",
+      selectedTipoServico: "Execução de alvenaria tradicional",
+      selectedNumeroProcedimento: "PS-008",
       pendingEntradaId: 1n,
       updatedAt: new Date(Date.now() - 59 * 60 * 1000)
     });
 
-    await deliverWaha(service, textWebhook("PS-045"));
+    await deliverWaha(service, textWebhook("Parede norte levantada"));
 
-    // Sessão mantida: o procedimento foi gravado e o registro concluído.
-    expect(store.entradas[0]).toMatchObject({ numeroProcedimento: "PS-045" });
+    // Sessão mantida: a descrição foi gravada e o registro concluído (procedimento veio da norma).
+    expect(store.entradas[0]).toMatchObject({
+      numeroProcedimento: "PS-008",
+      description: "Parede norte levantada"
+    });
     expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
   });
 

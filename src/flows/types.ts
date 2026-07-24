@@ -40,6 +40,14 @@ export interface ObraRecord {
   codigo: string;
 }
 
+/** Norma (Standard) do setor, usada para montar o menu de inspeção de serviço. */
+export interface NormaRecord {
+  /** Código do procedimento (ex: "PS-008"). */
+  code: string;
+  /** Título da norma (ex: "Execução de alvenaria tradicional"). */
+  title: string;
+}
+
 export interface ConversationStateRecord {
   chatId: string;
   phoneE164: string;
@@ -101,6 +109,18 @@ export interface EntradaForReport {
   mediaUrls: string[];
 }
 
+/**
+ * Dados de uma entrada usados para encaminhar a foto ao grupo de WhatsApp da
+ * obra (cópia do registro para conhecimento dos envolvidos).
+ */
+export interface EntradaForGroupForward {
+  description: string | null;
+  tipoServico: string | null;
+  numeroProcedimento: string | null;
+  usuarioNome: string | null;
+  mediaUrls: string[];
+}
+
 export interface ReportInput {
   categoria: string;
   empresaNome?: string | null;
@@ -138,6 +158,12 @@ export interface ConversationStore {
   }): Promise<{ user: UserRecord | null; alreadyLinked: boolean }>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
   findObrasAtivas(): Promise<ObraRecord[]>;
+  /**
+   * Lista as normas (Standards) ativas do setor da obra, ordenadas por código.
+   * São as opções do menu de inspeção de serviço: cada norma já implica o tipo
+   * de serviço (título) e o número do procedimento (código).
+   */
+  findNormasForObra(obraId: number): Promise<NormaRecord[]>;
   getState(chatId: string): Promise<ConversationStateRecord | null>;
   saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord>;
   clearState(chatId: string): Promise<void>;
@@ -162,6 +188,8 @@ export interface ConversationStore {
     dateEnd: Date;
   }): Promise<EntradaForReport[]>;
   findEntradasForObraDay(input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]>;
+  /** Dados de uma entrada para encaminhar a foto ao grupo de WhatsApp da obra. */
+  findEntradaForGroupForward(entradaId: bigint): Promise<EntradaForGroupForward | null>;
   findObraById(obraId: number): Promise<ObraForReport | null>;
   findObrasForAutoReport(): Promise<ObraForReport[]>;
   /**

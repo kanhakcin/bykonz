@@ -61,3 +61,19 @@ export function actionMenuText(tipo: EntryTipo): string {
 export function postSaveMenuText(): string {
   return "✅ Registro salvo! Já tá no diario da obra.\n\n1) Incluir outro registro\n2) Voltar ao menu";
 }
+
+/**
+ * Menu pós-registro da inspeção de serviço: permite continuar mandando fotos da
+ * MESMA norma em sequência (o engenheiro na laje tira várias fotos), sem
+ * reescolher a norma a cada uma. A próxima foto entra direto; o menu numérico
+ * cobre trocar de norma ou sair.
+ */
+export function postSaveInspecaoMenuText(norma: string): string {
+  return (
+    "✅ Registro salvo! Já tá no diario da obra.\n" +
+    `📸 Norma atual: ${norma}\n\n` +
+    "Envie mais uma FOTO pra registrar na mesma norma, ou digite:\n" +
+    "1) Trocar de norma\n" +
+    "2) Voltar ao menu"
+  );
+}

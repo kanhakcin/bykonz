@@ -550,7 +550,9 @@ export class PrismaPanelStore implements PanelStore {
           status: input.active ? "ACTIVE" : "INACTIVE",
           attributes: input.context ? { context: input.context } : undefined,
           whatsappGroupId: input.whatsappGroupId,
-          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled
+          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled,
+          reportEmailRecipients: input.reportEmailRecipients,
+          emailAutoReportEnabled: input.emailAutoReportEnabled
         }
       });
       return toProjectListItem(project);
@@ -588,7 +590,9 @@ export class PrismaPanelStore implements PanelStore {
           status: input.active ? "ACTIVE" : "INACTIVE",
           attributes,
           whatsappGroupId: input.whatsappGroupId,
-          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled
+          whatsappAutoReportEnabled: input.whatsappAutoReportEnabled,
+          reportEmailRecipients: input.reportEmailRecipients,
+          emailAutoReportEnabled: input.emailAutoReportEnabled
         }
       });
       return toProjectListItem(project);
@@ -900,6 +904,8 @@ function toProjectListItem(project: {
   attributes: unknown;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
 }): ProjectListItem {
   const attributes =
     project.attributes && typeof project.attributes === "object" && !Array.isArray(project.attributes)
@@ -917,7 +923,9 @@ function toProjectListItem(project: {
     // A key S3 fica no banco; a API expõe só a URL de download autenticado.
     coverImage: hasCover ? `/projects/${project.id}/cover` : null,
     whatsappGroupId: project.whatsappGroupId,
-    whatsappAutoReportEnabled: project.whatsappAutoReportEnabled
+    whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+    reportEmailRecipients: project.reportEmailRecipients,
+    emailAutoReportEnabled: project.emailAutoReportEnabled
   };
 }
 

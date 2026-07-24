@@ -5,7 +5,9 @@ import type {
   CreateEntradaInput,
   CreateTreinamentoInput,
   EmpresaRecord,
+  EntradaForGroupForward,
   EntradaForReport,
+  NormaRecord,
   ObraForReport,
   ObraRecord,
   SaveConversationStateInput,
@@ -135,6 +137,27 @@ export class PrismaConversationStore implements ConversationStore {
       id: project.id,
       nome: project.name,
       codigo: project.code
+    }));
+  }
+
+  async findNormasForObra(obraId: number): Promise<NormaRecord[]> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: obraId },
+      select: { sectorId: true }
+    });
+    if (!project) {
+      return [];
+    }
+
+    const standards = await this.prisma.standard.findMany({
+      where: { sectorId: project.sectorId, active: true },
+      orderBy: { code: "asc" },
+      select: { code: true, title: true }
+    });
+
+    return standards.map((standard) => ({
+      code: standard.code,
+      title: standard.title
     }));
   }
 
@@ -360,6 +383,27 @@ export class PrismaConversationStore implements ConversationStore {
     }));
   }
 
+  async findEntradaForGroupForward(entradaId: bigint): Promise<EntradaForGroupForward | null> {
+    const entry = await this.prisma.entry.findUnique({
+      where: { id: entradaId },
+      include: {
+        user: { select: { name: true } },
+        media: { select: { mediaUrl: true } }
+      }
+    });
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      description: entry.description,
+      tipoServico: entry.serviceType,
+      numeroProcedimento: entry.procedureNumber,
+      usuarioNome: entry.user.name ?? null,
+      mediaUrls: entry.media.map((m) => m.mediaUrl)
+    };
+  }
+
   async findObraById(obraId: number): Promise<ObraForReport | null> {
     const project = await this.prisma.project.findUnique({
       where: { id: obraId },
@@ -376,13 +420,20 @@ export class PrismaConversationStore implements ConversationStore {
       construtoraNome: project.company?.name ?? null,
       whatsappGroupId: project.whatsappGroupId,
       whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      reportEmailRecipients: project.reportEmailRecipients,
+      emailAutoReportEnabled: project.emailAutoReportEnabled,
       status: project.status
     };
   }
 
   async findObrasForAutoReport(): Promise<ObraForReport[]> {
+    // Canais independentes: seleciona obras ativas com QUALQUER canal de
+    // auto-report habilitado (WhatsApp e/ou e-mail).
     const projects = await this.prisma.project.findMany({
-      where: { status: "ACTIVE", whatsappAutoReportEnabled: true }
+      where: {
+        status: "ACTIVE",
+        OR: [{ whatsappAutoReportEnabled: true }, { emailAutoReportEnabled: true }]
+      }
     });
 
     return projects.map((project) => ({
@@ -390,6 +441,8 @@ export class PrismaConversationStore implements ConversationStore {
       nome: project.name,
       whatsappGroupId: project.whatsappGroupId,
       whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      reportEmailRecipients: project.reportEmailRecipients,
+      emailAutoReportEnabled: project.emailAutoReportEnabled,
       status: project.status
     }));
   }

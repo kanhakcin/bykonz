@@ -21,6 +21,8 @@ export function useProjectForm(initialData?: ProjectFormData, coverFile?: File |
       active: true,
       whatsappGroupId: '',
       whatsappAutoReportEnabled: false,
+      reportEmailRecipients: [],
+      emailAutoReportEnabled: false,
       ...initialData,
     },
   });

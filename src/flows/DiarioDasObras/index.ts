@@ -6,16 +6,11 @@ import type {
   FlowData,
   FlowDefinition,
   FlowHandleInput,
+  NormaRecord,
   ObraRecord,
   SaveConversationStateInput
 } from "../types";
-import {
-  isTipoServico,
-  numeroProcedimentoFaltandoText,
-  photoPromptText,
-  tipoServicoMenuText,
-  TIPO_SERVICO_OPTIONS
-} from "./categoriaEntrada";
+import { grupoCaptionText, normaLabel, normaMenuText, photoPromptText } from "./categoriaEntrada";
 import {
   DIARIO_OBRA_FLOW_STEPS,
   DIARIO_OBRA_REPORT_OPTION,
@@ -29,6 +24,7 @@ import {
   INCLUDE_ONLY_ACTION_OPTIONS,
   isEntryTipo,
   mainMenuText,
+  postSaveInspecaoMenuText,
   postSaveMenuText,
   POST_SAVE_OPTIONS,
   TIPO_OPTIONS
@@ -121,7 +117,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         await this.handleServiceType(input.chatId, input.phoneE164, input.user.id, state, input.text);
         return;
       case "AWAITING_PROCEDURE_NUMBER":
-        await this.handleProcedureNumber(input.chatId, input.phoneE164, state, input.text);
+        // Fluxo antigo (fallback de procedimento na inspeção de serviço) foi
+        // removido: a norma escolhida já traz o código. Qualquer estado preso
+        // aqui volta ao menu.
+        await this.resetToMenu(input.chatId, input.phoneE164);
         return;
       case "AWAITING_PHOTO":
         await this.handlePhoto(input.chatId, input.phoneE164, input.user.id, state, input.payload);
@@ -130,7 +129,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         await this.handleDescription(input.chatId, state, input.text);
         return;
       case "AWAITING_POST_SAVE_CHOICE":
-        await this.handlePostSaveChoice(input.chatId, input.phoneE164, input.user.id, state, input.text);
+        await this.handlePostSaveChoice(input.chatId, input.phoneE164, input.user.id, state, input.text, input.payload);
         return;
       case MATERIAL_FLOW_STEPS.awaitingOs:
         await this.handleMaterialOs(input.chatId, input.phoneE164, state, input.text);
@@ -449,6 +448,12 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
+    // A norma escolhida já traz o tipo de serviço (título) e o número do
+    // procedimento (código), então o menu de tipos foi substituído pela lista
+    // de normas do setor da obra. O menu sempre tem ao menos a opção "0) Outros"
+    // (registro sem norma), mesmo quando o setor não tem nenhuma cadastrada.
+    const normas = await this.deps.store.findNormasForObra(obraId);
+
     await this.saveState({
       chatId,
       phoneE164,
@@ -461,7 +466,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       selectedNumeroProcedimento: null,
       pendingEntradaId: null
     });
-    await this.sendWithHeader(chatId, obraNome, tipoServicoMenuText(tipo));
+    await this.sendWithHeader(chatId, obraNome, normaMenuText(tipo, normas));
   }
 
   private async resolveEmpresaForTraining(
@@ -817,67 +822,34 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    const tipoServico = TIPO_SERVICO_OPTIONS[text];
-    if (!tipoServico) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite um numero de 1 a 7.");
+    const normas = await this.deps.store.findNormasForObra(state.selectedObraId);
+    const escolha = Number(text.trim());
+    // A última opção do menu (normas.length + 1) é "Outros": registra a foto
+    // sem vincular norma (sem tipo de serviço nem número de procedimento).
+    const semNorma = escolha === normas.length + 1;
+    const norma: NormaRecord | null = semNorma
+      ? null
+      : (Number.isInteger(escolha) ? normas[escolha - 1] : undefined) ?? null;
+    if (!semNorma && !norma) {
+      await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Não entendi. Digite o numero da norma na lista acima.");
       return;
     }
 
     const empresa = await this.findSelectedEmpresaForUser(userId, state.selectedEmpresaId);
+    // A norma define tanto o tipo de serviço (título) quanto o número do
+    // procedimento (código), então já registramos os dois aqui. Em "Outros"
+    // ambos ficam nulos.
     await this.saveState({
       ...state,
       chatId,
       phoneE164,
       step: "AWAITING_PHOTO",
-      selectedTipoServico: tipoServico,
-      selectedNumeroProcedimento: null,
+      selectedTipoServico: norma ? norma.title : null,
+      selectedNumeroProcedimento: norma ? norma.code : null,
       pendingEntradaId: null
     });
 
-    // O número do procedimento é detectado automaticamente na descrição da
-    // foto; só perguntamos depois se não aparecer nenhum código.
-    await this.sendWithHeader(chatId, state.selectedObraNome, photoPromptText(tipo, empresa, tipoServico));
-  }
-
-  /**
-   * Passo de fallback: só é alcançado quando a descrição da foto não trouxe o
-   * código do procedimento. A entrada e a foto já existem (pendingEntradaId);
-   * aqui gravamos o número informado e concluímos o registro.
-   */
-  private async handleProcedureNumber(
-    chatId: string,
-    phoneE164: string,
-    state: ConversationStateRecord,
-    text: string
-  ): Promise<void> {
-    const tipo = this.requireSelectedTipo(state);
-    const tipoServico = this.requireSelectedTipoServico(state);
-    if (
-      !tipo ||
-      !state.selectedEmpresaId ||
-      !tipoServico ||
-      !state.selectedObraId ||
-      !state.selectedObraNome ||
-      !state.pendingEntradaId
-    ) {
-      await this.resetToMenu(chatId, phoneE164);
-      return;
-    }
-
-    const numeroProcedimento = text.trim();
-    if (!numeroProcedimento) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, numeroProcedimentoFaltandoText());
-      return;
-    }
-
-    await this.deps.store.updateEntradaProcedureNumber(state.pendingEntradaId, numeroProcedimento);
-
-    await this.finalizeEntradaDescription({
-      chatId,
-      phoneE164,
-      state,
-      entradaId: state.pendingEntradaId
-    });
+    await this.sendWithHeader(chatId, state.selectedObraNome, photoPromptText(tipo, empresa, norma));
   }
 
   private async handlePhoto(
@@ -888,8 +860,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     payload: IncomingMessage
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
-    const tipoServico = this.requireSelectedTipoServico(state);
-    if (!tipo || !state.selectedEmpresaId || !tipoServico || !state.selectedObraId || !state.selectedObraNome) {
+    // O tipo de serviço é opcional: na opção "Outros" a foto vai sem norma.
+    if (!tipo || !state.selectedEmpresaId || !state.selectedObraId || !state.selectedObraNome) {
       await this.resetToMenu(chatId, phoneE164);
       return;
     }
@@ -928,8 +900,9 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         empresaId: state.selectedEmpresaId,
         obraId: state.selectedObraId,
         tipo,
-        tipoServico,
-        numeroProcedimento: null,
+        // Vazios quando a foto é registrada em "Outros" (sem norma).
+        tipoServico: state.selectedTipoServico ?? null,
+        numeroProcedimento: state.selectedNumeroProcedimento ?? null,
         description: ""
       });
 
@@ -941,13 +914,14 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       const caption = payload.text.trim();
       if (caption) {
         // Usuario mandou a descricao junto da imagem (legenda). Aproveita e trata.
+        // O "Registro salvo!" da finalização já confirma o recebimento — não
+        // mandamos uma confirmação extra aqui pra não ficar redundante.
         await this.processEntradaDescription({
           chatId,
           phoneE164,
           state,
           entradaId: entrada.id,
-          description: caption,
-          confirmationText: "📸 Foto e descricao recebidas!"
+          description: caption
         });
         return;
       }
@@ -993,9 +967,9 @@ export class DiarioDasObrasFlow implements FlowDefinition {
   }
 
   /**
-   * Salva a descricao da entrada e decide o proximo passo: se a descricao
-   * trouxe o codigo do procedimento (ex: PS-031), conclui; senao, pede o
-   * numero do procedimento no passo de fallback.
+   * Salva a descricao da entrada e conclui o registro. O numero do procedimento
+   * ja veio da norma escolhida no inicio do fluxo, entao a descricao e livre e
+   * nao precisa carregar o codigo.
    */
   private async processEntradaDescription(input: {
     chatId: string;
@@ -1003,35 +977,11 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     state: ConversationStateRecord;
     entradaId: bigint;
     description: string;
-    confirmationText?: string;
   }): Promise<void> {
-    const { chatId, phoneE164, state, entradaId, description, confirmationText } = input;
+    const { chatId, phoneE164, state, entradaId, description } = input;
 
     await this.deps.store.updateEntradaDescription(entradaId, description);
-
-    const temProcedimento = await this.deps.store.hasProcedureCode({
-      obraId: state.selectedObraId,
-      text: description
-    });
-
-    if (temProcedimento) {
-      await this.finalizeEntradaDescription({ chatId, phoneE164, state, entradaId, confirmationText });
-      return;
-    }
-
-    // Faltou o numero do procedimento na descricao: guarda a entrada e pergunta.
-    await this.saveState({
-      ...state,
-      chatId,
-      phoneE164,
-      step: "AWAITING_PROCEDURE_NUMBER",
-      pendingEntradaId: entradaId
-    });
-
-    if (confirmationText) {
-      await this.sendWithHeader(chatId, state.selectedObraNome ?? null, confirmationText);
-    }
-    await this.sendWithHeader(chatId, state.selectedObraNome ?? null, numeroProcedimentoFaltandoText());
+    await this.finalizeEntradaDescription({ chatId, phoneE164, state, entradaId });
   }
 
   /** Conclui o registro (descricao ja salva) e leva o usuario ao menu pos-registro. */
@@ -1040,9 +990,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string;
     state: ConversationStateRecord;
     entradaId: bigint;
-    confirmationText?: string;
   }): Promise<void> {
-    const { chatId, phoneE164, state, confirmationText } = input;
+    const { chatId, phoneE164, state } = input;
 
     if (!state.selectedObraId || !state.selectedObraNome) {
       await this.deps.store.clearState(chatId);
@@ -1050,19 +999,73 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
+    const isInspecao = this.requireSelectedTipo(state) === "Inspecao de servico";
+
+    // Cópia da inspeção de serviço para o grupo de WhatsApp da obra, para
+    // conhecimento dos envolvidos — o usuário não precisa reenviar no grupo.
+    // Best-effort: uma falha aqui nunca bloqueia o registro (já salvo).
+    if (isInspecao) {
+      await this.forwardInspecaoToGroup(input.entradaId, state.selectedObraId, state.selectedObraNome);
+    }
+
+    // Na inspeção de serviço preservamos a norma escolhida (tipoServico +
+    // numeroProcedimento) para permitir mandar mais fotos da mesma norma em
+    // sequência a partir do menu pós-registro. Nos demais tipos, limpamos.
     await this.saveState({
       ...state,
       chatId,
       phoneE164,
       step: "AWAITING_POST_SAVE_CHOICE",
-      selectedNumeroProcedimento: null,
+      selectedNumeroProcedimento: isInspecao ? (state.selectedNumeroProcedimento ?? null) : null,
       pendingEntradaId: null
     });
 
-    if (confirmationText) {
-      await this.sendWithHeader(chatId, state.selectedObraNome, confirmationText);
+    const menu = isInspecao
+      ? postSaveInspecaoMenuText(normaLabel(state.selectedTipoServico ?? null, state.selectedNumeroProcedimento ?? null))
+      : postSaveMenuText();
+    await this.sendWithHeader(chatId, state.selectedObraNome, menu);
+  }
+
+  /**
+   * Reenvia a foto do registro para o grupo de WhatsApp da obra (cópia para os
+   * envolvidos). O router de canal despacha o JID do grupo para o WAHA mesmo
+   * quando o registro veio pelo Telegram. Best-effort: se a obra não tem grupo
+   * cadastrado, não faz nada; qualquer erro é logado e engolido para não
+   * quebrar o fluxo — o registro já está salvo no diário.
+   */
+  private async forwardInspecaoToGroup(entradaId: bigint, obraId: number, obraNome: string): Promise<void> {
+    try {
+      const obra = await this.deps.store.findObraById(obraId);
+      const grupoId = obra?.whatsappGroupId?.trim();
+      if (!grupoId) {
+        return;
+      }
+
+      const entrada = await this.deps.store.findEntradaForGroupForward(entradaId);
+      const mediaPath = entrada?.mediaUrls[0];
+      if (!entrada || !mediaPath) {
+        return;
+      }
+
+      const body = await this.deps.objectStorage.downloadPrivateObject(mediaPath);
+      const mimetype = mimetypeFromPath(mediaPath);
+      const filename = mediaPath.split("/").pop() ?? "foto.jpg";
+      const caption = grupoCaptionText({
+        description: entrada.description,
+        tipoServico: entrada.tipoServico,
+        numeroProcedimento: entrada.numeroProcedimento,
+        usuarioNome: entrada.usuarioNome,
+        obraNome
+      });
+
+      await this.deps.messaging.sendFile(
+        grupoId,
+        { mimetype, filename, data: body.toString("base64") },
+        caption
+      );
+    } catch (error) {
+      console.error("Failed to forward inspecao to WhatsApp group", error);
     }
-    await this.sendWithHeader(chatId, state.selectedObraNome, postSaveMenuText());
   }
 
   private async handlePostSaveChoice(
@@ -1070,7 +1073,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     phoneE164: string,
     userId: number,
     state: ConversationStateRecord,
-    text: string
+    text: string,
+    payload?: IncomingMessage
   ): Promise<void> {
     const tipo = this.requireSelectedTipo(state);
     if (!tipo || !state.selectedObraId || !state.selectedObraNome) {
@@ -1078,7 +1082,18 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
+    const isInspecao = tipo === "Inspecao de servico";
+
+    // Inspeção de serviço: mandar outra FOTO registra direto na mesma norma
+    // (fotos em sequência), sem reescolher. O state ainda tem a norma preservada.
+    if (isInspecao && payload?.media?.ref) {
+      await this.handlePhoto(chatId, phoneE164, userId, state, payload);
+      return;
+    }
+
     if (text === POST_SAVE_OPTIONS.novoRegistro) {
+      // Na inspeção, "1" é "Trocar de norma"; nos demais, "Incluir outro registro".
+      // Ambos caem no mesmo ponto: reabrir a escolha (empresa →) norma.
       await this.resolveEmpresaForAdd(chatId, phoneE164, userId, state, tipo);
       return;
     }
@@ -1088,7 +1103,10 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
-    await this.sendWithHeader(chatId, state.selectedObraNome, "⚠️ Digite 1 pra incluir outro registro ou 2 pra voltar ao menu.");
+    const aviso = isInspecao
+      ? "⚠️ Envie uma FOTO pra registrar na mesma norma, ou digite 1 pra trocar de norma ou 2 pra voltar ao menu."
+      : "⚠️ Digite 1 pra incluir outro registro ou 2 pra voltar ao menu.";
+    await this.sendWithHeader(chatId, state.selectedObraNome, aviso);
   }
 
   private async handleMaterialOs(
@@ -1605,14 +1623,6 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     return null;
   }
 
-  private requireSelectedTipoServico(state: ConversationStateRecord) {
-    if (isTipoServico(state.selectedTipoServico)) {
-      return state.selectedTipoServico;
-    }
-
-    return null;
-  }
-
   private empresaMenuText(empresas: EmpresaRecord[]): string {
     const options = empresas
       .map((empresa, index) => `${index + 1}) ${empresa.nome ?? `Empresa ${empresa.id.toString()}`}`)
@@ -1815,6 +1825,24 @@ function buildStoragePath(input: {
   const obraSegment = input.obraId != null ? `obras/${input.obraId}` : "obras/sem-obra";
 
   return `entradas/${input.empresaId.toString()}/${obraSegment}/${date}/${input.userId}_${safeMessageId}.${extension}`;
+}
+
+/** Infere o mimetype pela extensão do path salvo no storage (inversa de extensionFrom). */
+function mimetypeFromPath(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function extensionFrom(filename: string | null | undefined, contentType: string): string {

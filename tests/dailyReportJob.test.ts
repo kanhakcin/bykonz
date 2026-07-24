@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runDailyReportJob, type DailyReportJobDeps } from "../src/jobs/dailyReportJob";
 import type { DailyReportService } from "../src/services/dailyReportService";
-import type { MessagingClient, ObraForReport } from "../src/services/conversationService";
+import type { Mailer, MessagingClient, ObraForReport } from "../src/services/conversationService";
 
 function makeObra(overrides: Partial<ObraForReport> = {}): ObraForReport {
   return {
@@ -9,6 +9,8 @@ function makeObra(overrides: Partial<ObraForReport> = {}): ObraForReport {
     nome: "Obra Residencial Aurora",
     whatsappGroupId: "1203630xxxxx@g.us",
     whatsappAutoReportEnabled: true,
+    reportEmailRecipients: [],
+    emailAutoReportEnabled: false,
     status: "ACTIVE",
     ...overrides
   };
@@ -30,11 +32,24 @@ function makeMessaging(): MessagingClient & {
   };
 }
 
+function makeMailer(): Mailer & {
+  sent: Array<{ to: string[]; subject: string; text: string; html?: string; attachments?: unknown[] }>;
+} {
+  return {
+    sent: [],
+    async sendMail(input) {
+      this.sent.push(input);
+    }
+  };
+}
+
 describe("runDailyReportJob", () => {
-  it("skips an obra without a whatsappGroupId and logs an error", async () => {
+  it("skips the WhatsApp channel (logging) when auto-report is on but whatsappGroupId is empty", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const messaging = makeMessaging();
-    const dailyReportService = { generateForObraDay: vi.fn() } as unknown as DailyReportService;
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 2 })
+    } as unknown as DailyReportService;
     const deps: DailyReportJobDeps = {
       dailyReportService,
       store: { findObrasForAutoReport: async () => [makeObra({ whatsappGroupId: null })] },
@@ -43,7 +58,6 @@ describe("runDailyReportJob", () => {
 
     await runDailyReportJob(deps, "2026-07-06");
 
-    expect(dailyReportService.generateForObraDay).not.toHaveBeenCalled();
     expect(messaging.messages).toHaveLength(0);
     expect(messaging.files).toHaveLength(0);
     expect(errorSpy).toHaveBeenCalled();
@@ -137,6 +151,172 @@ describe("runDailyReportJob", () => {
     await runDailyReportJob(deps, "2026-07-06");
 
     expect(messaging.messages).toHaveLength(0);
+    expect(messaging.files).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("sends only email for an obra with email enabled and WhatsApp disabled", async () => {
+    const messaging = makeMessaging();
+    const mailer = makeMailer();
+    const dailyReportService = {
+      generateForObraDay: vi
+        .fn()
+        .mockResolvedValue({ buffer: Buffer.from("%PDF-mail"), totalEntradas: 2, filename: "MRH - DO 5 - 06-07-26.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({
+            whatsappAutoReportEnabled: false,
+            whatsappGroupId: null,
+            emailAutoReportEnabled: true,
+            reportEmailRecipients: ["eng@empresa.com.br", "cliente@empresa.com.br"]
+          })
+        ]
+      },
+      messaging,
+      mailer
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    // Não tocou no WhatsApp.
+    expect(messaging.files).toHaveLength(0);
+    expect(messaging.messages).toHaveLength(0);
+    // Enviou o e-mail com o PDF anexado para os destinatários.
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0].to).toEqual(["eng@empresa.com.br", "cliente@empresa.com.br"]);
+    expect(mailer.sent[0].subject).toContain("Obra Residencial Aurora");
+    // Corpo apresentável (HTML) + anexo do PDF.
+    expect(mailer.sent[0].html).toContain("Diário de Obra");
+    expect(mailer.sent[0].attachments).toHaveLength(1);
+    expect((mailer.sent[0].attachments?.[0] as { filename: string }).filename).toBe("MRH - DO 5 - 06-07-26.pdf");
+  });
+
+  it("sends to both channels when both are enabled", async () => {
+    const messaging = makeMessaging();
+    const mailer = makeMailer();
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    expect(messaging.files).toHaveLength(1);
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it("does not send email on an empty day (but WhatsApp still notices)", async () => {
+    const messaging = makeMessaging();
+    const mailer = makeMailer();
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 0 })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    expect(mailer.sent).toHaveLength(0);
+    // WhatsApp mantém o aviso de texto do dia vazio.
+    expect(messaging.messages).toHaveLength(1);
+    expect(messaging.messages[0].text).toContain("nenhum registro");
+  });
+
+  it("email failure does not block the WhatsApp channel", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const messaging = makeMessaging();
+    const mailer: Mailer = {
+      async sendMail() {
+        throw new Error("smtp down");
+      }
+    };
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    // WhatsApp foi enviado mesmo com o e-mail falhando.
+    expect(messaging.files).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("does not send email when enabled but recipients list is empty", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const messaging = makeMessaging();
+    const mailer = makeMailer();
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ whatsappAutoReportEnabled: false, emailAutoReportEnabled: true, reportEmailRecipients: [] })
+        ]
+      },
+      messaging,
+      mailer
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    expect(mailer.sent).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("does not send email when the mailer is not configured (null)", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const messaging = makeMessaging();
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ whatsappAutoReportEnabled: false, emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer: null
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
     expect(messaging.files).toHaveLength(0);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();

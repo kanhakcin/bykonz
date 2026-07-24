@@ -1,5 +1,6 @@
 import type { AppConfig } from "./config/env";
 import { WahaClient } from "./lib/wahaClient";
+import { MailClient } from "./lib/mailClient";
 import { TelegramClient } from "./lib/telegramClient";
 import { ChannelRouterClient } from "./lib/channelRouterClient";
 import { TelegramOnboardingClient } from "./lib/telegramOnboarding";
@@ -67,18 +68,20 @@ export function createPanelService(config: AppConfig): PanelService {
   return new PanelService(new PrismaPanelStore(prisma), {
     timezoneOffset: config.panelTimezoneOffset,
     mediaStorage: objectStorage,
-    dailyReportService: createDailyReportService(config)
+    dailyReportService: createDailyReportService(config),
+    mailer: MailClient.fromConfig(config)
   });
 }
 
 export function createDailyReportJobDeps(config: AppConfig): DailyReportJobDeps {
-  // Auto-report continua WhatsApp-only (grupos são fase futura). O router
-  // despacha os group JIDs (sem prefixo `tg:`) para o WahaClient; se WAHA não
-  // estiver configurado e houver obra com auto-report, o envio falha de forma
-  // explícita — comportamento aceitável para v1.
+  // Auto-report em dois canais independentes: WhatsApp (grupo da obra, via
+  // router → WahaClient) e e-mail (destinatários da obra, via SMTP/MailClient).
+  // O MailClient é null se o SMTP não estiver configurado — o canal de e-mail
+  // simplesmente não dispara, sem quebrar o job.
   return {
     dailyReportService: createDailyReportService(config),
     store: new PrismaConversationStore(prisma),
-    messaging: createRoutedMessaging(config).messaging
+    messaging: createRoutedMessaging(config).messaging,
+    mailer: MailClient.fromConfig(config)
   };
 }

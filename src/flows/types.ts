@@ -40,6 +40,14 @@ export interface ObraRecord {
   codigo: string;
 }
 
+/** Norma (Standard) do setor, usada para montar o menu de inspeção de serviço. */
+export interface NormaRecord {
+  /** Código do procedimento (ex: "PS-008"). */
+  code: string;
+  /** Título da norma (ex: "Execução de alvenaria tradicional"). */
+  title: string;
+}
+
 export interface ConversationStateRecord {
   chatId: string;
   phoneE164: string;
@@ -101,6 +109,18 @@ export interface EntradaForReport {
   mediaUrls: string[];
 }
 
+/**
+ * Dados de uma entrada usados para encaminhar a foto ao grupo de WhatsApp da
+ * obra (cópia do registro para conhecimento dos envolvidos).
+ */
+export interface EntradaForGroupForward {
+  description: string | null;
+  tipoServico: string | null;
+  numeroProcedimento: string | null;
+  usuarioNome: string | null;
+  mediaUrls: string[];
+}
+
 export interface ReportInput {
   categoria: string;
   empresaNome?: string | null;
@@ -119,6 +139,9 @@ export interface ObraForReport {
   construtoraNome?: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  /** Destinatários do relatório por e-mail (auto-report), independente do WhatsApp. */
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
   status: string;
 }
 
@@ -138,6 +161,12 @@ export interface ConversationStore {
   }): Promise<{ user: UserRecord | null; alreadyLinked: boolean }>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
   findObrasAtivas(): Promise<ObraRecord[]>;
+  /**
+   * Lista as normas (Standards) ativas do setor da obra, ordenadas por código.
+   * São as opções do menu de inspeção de serviço: cada norma já implica o tipo
+   * de serviço (título) e o número do procedimento (código).
+   */
+  findNormasForObra(obraId: number): Promise<NormaRecord[]>;
   getState(chatId: string): Promise<ConversationStateRecord | null>;
   saveState(input: SaveConversationStateInput): Promise<ConversationStateRecord>;
   clearState(chatId: string): Promise<void>;
@@ -162,6 +191,8 @@ export interface ConversationStore {
     dateEnd: Date;
   }): Promise<EntradaForReport[]>;
   findEntradasForObraDay(input: { obraId: number; dateStart: Date; dateEnd: Date }): Promise<EntradaForReport[]>;
+  /** Dados de uma entrada para encaminhar a foto ao grupo de WhatsApp da obra. */
+  findEntradaForGroupForward(entradaId: bigint): Promise<EntradaForGroupForward | null>;
   findObraById(obraId: number): Promise<ObraForReport | null>;
   findObrasForAutoReport(): Promise<ObraForReport[]>;
   /**
@@ -187,6 +218,27 @@ export interface MediaDownloader {
    * WAHA: a URL. Telegram: o file_id.
    */
   download(ref: string): Promise<Buffer>;
+}
+
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
+/**
+ * Porta de envio de e-mail (abstração sobre o transporte SMTP). O job depende
+ * desta interface, não do nodemailer diretamente, para permitir fakes em teste.
+ */
+export interface Mailer {
+  sendMail(input: {
+    to: string[];
+    subject: string;
+    text: string;
+    /** Corpo HTML (opcional). Clientes sem HTML caem no `text`. */
+    html?: string;
+    attachments?: MailAttachment[];
+  }): Promise<void>;
 }
 
 /**

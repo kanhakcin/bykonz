@@ -22,6 +22,13 @@ export interface AppConfig {
   panelCorsOrigins: string[];
   panelTimezoneOffset: string;
   dailyReportCron: string;
+  /** SMTP (e-mail) — opcional; presente apenas se SMTP_HOST + SMTP_FROM existirem. */
+  smtpHost: string | undefined;
+  smtpPort: number;
+  smtpUser: string | undefined;
+  smtpPass: string | undefined;
+  smtpFrom: string | undefined;
+  smtpSecure: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -47,6 +54,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error("PORT must be a positive integer");
   }
 
+  // SMTP é opcional (canal de e-mail do auto-report). Só é considerado
+  // "configurado" com host + remetente; caso contrário o canal fica desligado.
+  const smtpConfigured = Boolean(env.SMTP_HOST && env.SMTP_FROM);
+  const smtpPort = Number(env.SMTP_PORT ?? 587);
+  if (env.SMTP_PORT !== undefined && (!Number.isInteger(smtpPort) || smtpPort <= 0)) {
+    throw new Error("SMTP_PORT must be a positive integer");
+  }
+
   return {
     nodeEnv: env.NODE_ENV ?? "development",
     port,
@@ -68,8 +83,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((origin) => origin.trim())
       .filter(Boolean),
     panelTimezoneOffset: env.PANEL_TZ_OFFSET ?? "-03:00",
-    dailyReportCron: env.DAILY_REPORT_CRON ?? "0 18 * * *"
+    dailyReportCron: env.DAILY_REPORT_CRON ?? "0 18 * * *",
+    smtpHost: smtpConfigured ? env.SMTP_HOST! : undefined,
+    smtpPort,
+    smtpUser: env.SMTP_USER,
+    smtpPass: env.SMTP_PASS,
+    smtpFrom: smtpConfigured ? env.SMTP_FROM! : undefined,
+    // Porta 465 = TLS implícito (secure); 587/25 = STARTTLS. SMTP_SECURE sobrepõe,
+    // aceitando valores comuns (true/1/yes/ssl/tls). Sem valor reconhecido, infere
+    // pela porta (465 → secure). Evita o clássico "Greeting never received" quando
+    // a porta e o modo TLS ficam incompatíveis.
+    smtpSecure: parseSmtpSecure(env.SMTP_SECURE, smtpPort)
   };
+}
+
+function parseSmtpSecure(value: string | undefined, port: number): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return port === 465;
+  }
+  if (["true", "1", "yes", "ssl", "tls", "ssl/tls", "tls/ssl"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "none", "starttls", "plain"].includes(normalized)) {
+    return false;
+  }
+  // Valor não reconhecido: cai na inferência por porta.
+  return port === 465;
 }
 
 export function normalizeUrlOriginAndPath(value: string, name: string): string {

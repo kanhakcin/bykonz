@@ -19,7 +19,7 @@ export function AuthLayout({ children }: { children?: ReactNode }) {
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
       <aside className="hidden flex-col justify-between bg-muted/40 p-10 lg:flex">
-        <span className="font-bold text-lg">{t('app.name')}</span>
+        <img src="/logo.svg" alt={t('app.name')} className="h-7 w-auto self-start" />
 
         <div className="flex flex-col gap-8">
           <div className="flex flex-col gap-2">

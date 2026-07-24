@@ -1,13 +1,10 @@
 import { createFlowRegistry, type FlowRegistry } from "../flows/registry";
 import type { ConversationServiceDeps, ConversationStateRecord, UserRecord } from "../flows/types";
-import type { WahaMessagePayload, WahaWebhook } from "../types/waha";
-import {
-  extractPhoneFromWahaPayload,
-  getWahaPhoneLookupCandidates,
-  readNestedString
-} from "../utils/phone";
+import type { IncomingMessage } from "../types/message";
+import { getWahaPhoneLookupCandidates } from "../utils/phone";
 
 export type {
+  ChannelOnboarding,
   ConversationServiceDeps,
   ConversationStateRecord,
   ConversationStore,
@@ -45,22 +42,18 @@ export class ConversationService {
     this.flowRegistry = createFlowRegistry(deps);
   }
 
-  async handleWebhook(webhook: WahaWebhook): Promise<void> {
-    if (!this.isSupportedWebhook(webhook)) {
-      return;
-    }
-
-    const payload = webhook.payload;
-    const chatId = payload.from ?? payload.chatId;
+  /**
+   * Recebe uma mensagem já normalizada (channel-agnóstica) pela borda de cada
+   * canal. Toda a especificidade de WAHA/Telegram (filtro de evento/fromMe,
+   * extração de telefone, resolução de file_id) vive nos adapters de entrada.
+   */
+  async handleWebhook(message: IncomingMessage): Promise<void> {
+    const chatId = message.chatId;
     if (!chatId) {
       return;
     }
 
-    if (this.isGroupChat(chatId)) {
-      return;
-    }
-
-    await this.withChatLock(chatId, () => this.processWebhook(chatId, webhook));
+    await this.withChatLock(chatId, () => this.processMessage(message));
   }
 
   private async withChatLock<T>(chatId: string, fn: () => Promise<T>): Promise<T> {
@@ -81,35 +74,37 @@ export class ConversationService {
     }
   }
 
-  private async processWebhook(
-    chatId: string,
-    webhook: WahaWebhook & { payload: WahaMessagePayload }
-  ): Promise<void> {
-    const payload = webhook.payload;
-    const wahaPhoneDigits = extractPhoneFromWahaPayload(payload);
-    const phoneLookupCandidates = getWahaPhoneLookupCandidates(wahaPhoneDigits);
-    const phoneDebugFields = this.wahaPhoneDebugFields(payload);
-    this.logWahaDebug("WAHA webhook phone lookup started", {
-      event: webhook.event,
-      session: webhook.session,
+  private async processMessage(message: IncomingMessage): Promise<void> {
+    const chatId = message.chatId;
+    this.logChannelDebug("channel message received", {
+      channel: message.channel,
       chatId,
-      hasMedia: payload.hasMedia ?? false,
-      source: payload.source ?? null,
-      ...phoneDebugFields,
-      wahaPhoneDigits,
-      phoneLookupCandidates
+      hasMedia: message.media != null,
+      hasSharedContact: message.sharedContact != null,
+      identityKind: message.identity.kind
     });
 
-    const user = await this.findUserByWahaPhone(phoneLookupCandidates);
+    // Onboarding do Telegram: o operador compartilhou o telefone para auto-
+    // vincular o telegramUserId. Tratado antes da resolução de identidade.
+    if (message.sharedContact && message.identity.kind === "telegram") {
+      await this.handleSharedContact(chatId, message.identity.value, message.sharedContact);
+      return;
+    }
+
+    const user = await this.resolveUser(message);
     if (!user) {
-      console.warn("WAHA phone lookup did not match a registered user", {
-        event: webhook.event,
-        session: webhook.session,
+      this.logChannelDebug("channel identity did not match a registered user", {
+        channel: message.channel,
         chatId,
-        ...phoneDebugFields,
-        wahaPhoneDigits,
-        phoneLookupCandidates
+        identityKind: message.identity.kind,
+        identityValue: message.identity.value
       });
+      // No Telegram, o bot não conhece o telefone do operador; em vez de só
+      // recusar, oferece o botão de compartilhar contato para auto-vínculo.
+      if (message.identity.kind === "telegram" && this.deps.channelOnboarding) {
+        await this.deps.channelOnboarding.promptShareContact(chatId);
+        return;
+      }
       await this.deps.messaging.sendText(
         chatId,
         "Numero nao cadastrado. Fale com o administrador para liberar o acesso."
@@ -118,17 +113,16 @@ export class ConversationService {
     }
 
     const phoneE164 = user.phoneE164;
-    this.logWahaDebug("WAHA phone lookup matched registered user", {
+    this.logChannelDebug("channel identity matched registered user", {
+      channel: message.channel,
       chatId,
-      wahaPhoneDigits,
-      phoneLookupCandidates,
       matchedPhoneE164: phoneE164,
       userId: user.id
     });
 
-    const text = (payload.body ?? "").trim();
+    const text = (message.text ?? "").trim();
     if (this.isResetCommand(text)) {
-      this.logWahaDebug("WAHA reset command received", {
+      this.logChannelDebug("reset command received", {
         chatId,
         phoneE164,
         userId: user.id,
@@ -139,19 +133,19 @@ export class ConversationService {
     }
 
     const loadedState = await this.deps.store.getState(chatId);
-    this.logWahaDebug("WAHA conversation state loaded", {
+    this.logChannelDebug("conversation state loaded", {
       chatId,
       phoneE164,
       userId: user.id,
       stateStep: loadedState?.stepKey ?? loadedState?.step ?? null,
       flowKey: loadedState?.flowKey ?? null,
-      hasMedia: payload.hasMedia ?? false,
+      hasMedia: message.media != null,
       textLength: text.length
     });
 
     if (!loadedState || this.isSessionExpired(loadedState)) {
       if (loadedState) {
-        this.logWahaDebug("WAHA conversation session expired", {
+        this.logChannelDebug("conversation session expired", {
           chatId,
           phoneE164,
           userId: user.id,
@@ -161,7 +155,7 @@ export class ConversationService {
       }
 
       const state = await this.createInitialState(chatId, phoneE164);
-      this.logWahaDebug("WAHA conversation state created", {
+      this.logChannelDebug("conversation state created", {
         chatId,
         phoneE164,
         userId: user.id,
@@ -175,7 +169,7 @@ export class ConversationService {
         user,
         state,
         text,
-        payload
+        payload: message
       });
       return;
     }
@@ -187,7 +181,7 @@ export class ConversationService {
       user,
       state: loadedState,
       text,
-      payload
+      payload: message
     });
   }
 
@@ -212,8 +206,18 @@ export class ConversationService {
     });
   }
 
-  private async findUserByWahaPhone(phoneLookupCandidates: string[]): Promise<UserRecord | null> {
-    for (const candidate of phoneLookupCandidates) {
+  /**
+   * Resolve o operador a partir da identidade crua do canal:
+   * - phone → candidatos BR (com/sem o 9) + findUserByPhone (WhatsApp);
+   * - telegram → findUserByTelegramId.
+   */
+  private async resolveUser(message: IncomingMessage): Promise<UserRecord | null> {
+    if (message.identity.kind === "telegram") {
+      return this.deps.store.findUserByTelegramId(message.identity.value);
+    }
+
+    const candidates = getWahaPhoneLookupCandidates(message.identity.value);
+    for (const candidate of candidates) {
       const user = await this.deps.store.findUserByPhone(candidate);
       if (user) {
         return user;
@@ -223,43 +227,84 @@ export class ConversationService {
     return null;
   }
 
-  private wahaPhoneDebugFields(payload: WahaMessagePayload): Record<string, string | null> {
-    return {
-      payloadFrom: payload.from ?? null,
-      payloadChatId: payload.chatId ?? null,
-      sender: readNestedString(payload, ["_data", "Info", "Sender"]) ?? readNestedString(payload, ["_data", "Sender"]) ?? null,
-      senderAlt:
-        readNestedString(payload, ["_data", "Info", "SenderAlt"]) ??
-        readNestedString(payload, ["_data", "SenderAlt"]) ??
-        null
-    };
+  /**
+   * Auto-vínculo do Telegram: casa o telefone compartilhado com um operador
+   * cadastrado e grava o telegramUserId. Só vincula se o contato for do próprio
+   * remetente e o operador ainda não tiver Telegram vinculado.
+   */
+  private async handleSharedContact(
+    chatId: string,
+    telegramUserId: string,
+    contact: { phone: string; belongsToSender: boolean }
+  ): Promise<void> {
+    // Se o operador já está vinculado (mandou o contato de novo), só confirma.
+    const existing = await this.deps.store.findUserByTelegramId(telegramUserId);
+    if (existing) {
+      await this.finishOnboarding(chatId, existing.nome);
+      return;
+    }
+
+    if (!contact.belongsToSender) {
+      this.logChannelDebug("shared contact rejected: not the sender's own contact", { chatId });
+      await this.deps.messaging.sendText(
+        chatId,
+        "⚠️ Compartilhe o seu próprio contato usando o botão para vincular seu acesso."
+      );
+      return;
+    }
+
+    const phoneDigits = contact.phone.replace(/\D/g, "");
+    const phoneCandidates = getWahaPhoneLookupCandidates(phoneDigits);
+
+    const { user, alreadyLinked } = await this.deps.store.linkTelegramIdByPhone({
+      phoneCandidates,
+      telegramUserId
+    });
+
+    if (alreadyLinked) {
+      // O operador (por telefone) já tinha OUTRO telegramUserId vinculado.
+      this.logChannelDebug("shared contact matched a user already linked to another telegram id", {
+        chatId
+      });
+      await this.deps.messaging.sendText(
+        chatId,
+        "Este cadastro ja esta vinculado a outra conta do Telegram. Fale com o administrador."
+      );
+      return;
+    }
+
+    if (!user) {
+      this.logChannelDebug("shared contact did not match a registered user", {
+        chatId,
+        phoneCandidates
+      });
+      await this.deps.messaging.sendText(
+        chatId,
+        "Seu telefone nao esta cadastrado. Fale com o administrador para liberar o acesso."
+      );
+      return;
+    }
+
+    this.logChannelDebug("shared contact linked telegram id to user", {
+      chatId,
+      userId: user.id,
+      telegramUserId
+    });
+    await this.finishOnboarding(chatId, user.nome);
   }
 
-  private logWahaDebug(message: string, details: Record<string, unknown>): void {
-    if (isWahaDebugLoggingEnabled()) {
+  private async finishOnboarding(chatId: string, userName?: string | null): Promise<void> {
+    if (this.deps.channelOnboarding) {
+      await this.deps.channelOnboarding.confirmContactLinked(chatId, userName);
+      return;
+    }
+    await this.deps.messaging.sendText(chatId, "✅ Acesso vinculado! Digite *menu* para começar.");
+  }
+
+  private logChannelDebug(message: string, details: Record<string, unknown>): void {
+    if (isChannelDebugLoggingEnabled()) {
       console.info(message, details);
     }
-  }
-
-  private isSupportedWebhook(webhook: WahaWebhook): webhook is WahaWebhook & { payload: WahaMessagePayload } {
-    if (webhook.event !== "message" && webhook.event !== "message.any") {
-      return false;
-    }
-
-    if (!webhook.payload) {
-      return false;
-    }
-
-    if (webhook.payload.fromMe || webhook.payload.source === "api") {
-      return false;
-    }
-
-    return true;
-  }
-
-  /** Grupos (ex. usados para o relatório automático) ficam em standby: o bot nunca responde lá, só recebe o PDF automático. */
-  private isGroupChat(chatId: string): boolean {
-    return chatId.endsWith("@g.us");
   }
 
   private isResetCommand(text: string): boolean {
@@ -276,7 +321,7 @@ export class ConversationService {
   }
 }
 
-function isWahaDebugLoggingEnabled(): boolean {
+function isChannelDebugLoggingEnabled(): boolean {
   const value = process.env.WAHA_DEBUG_LOGS?.toLowerCase();
   return value === "1" || value === "true" || value === "yes";
 }

@@ -2,22 +2,36 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, type WebhookHandler } from "../src/app";
 import type { WahaWebhook } from "../src/types/waha";
+import type { TelegramUpdate } from "../src/types/telegram";
+import type { IncomingMessage } from "../src/types/message";
 
 class FakeWebhookHandler implements WebhookHandler {
-  calls: WahaWebhook[] = [];
+  calls: IncomingMessage[] = [];
 
-  async handleWebhook(webhook: WahaWebhook): Promise<void> {
-    this.calls.push(webhook);
+  async handleWebhook(message: IncomingMessage): Promise<void> {
+    this.calls.push(message);
   }
 }
 
-const PAYLOAD: WahaWebhook = {
+const WAHA_PAYLOAD: WahaWebhook = {
   event: "message",
   session: "default",
   payload: {
+    id: "msg-1",
     from: "5511999999999@c.us",
     body: "oi",
     hasMedia: false
+  }
+};
+
+const TELEGRAM_UPDATE: TelegramUpdate = {
+  update_id: 1,
+  message: {
+    message_id: 10,
+    chat: { id: 42, type: "private" },
+    from: { id: 42, first_name: "Op" },
+    date: 0,
+    text: "oi"
   }
 };
 
@@ -29,20 +43,38 @@ describe("Express app", () => {
     await request(app).get("/health").expect(200, { ok: true });
   });
 
-  it("passes WAHA webhook payloads to the handler when no secret configured", async () => {
+  it("adapts WAHA webhook payloads to IncomingMessage when no secret configured", async () => {
     const handler = new FakeWebhookHandler();
     const app = createApp(handler);
 
-    await request(app).post("/webhooks/waha").send(PAYLOAD).expect(200, { ok: true });
+    await request(app).post("/webhooks/waha").send(WAHA_PAYLOAD).expect(200, { ok: true });
 
-    expect(handler.calls).toEqual([PAYLOAD]);
+    expect(handler.calls).toHaveLength(1);
+    expect(handler.calls[0]).toMatchObject({
+      channel: "whatsapp",
+      chatId: "5511999999999@c.us",
+      text: "oi",
+      identity: { kind: "phone", value: "5511999999999" }
+    });
+  });
+
+  it("ignores unsupported WAHA events without calling the handler", async () => {
+    const handler = new FakeWebhookHandler();
+    const app = createApp(handler);
+
+    await request(app)
+      .post("/webhooks/waha")
+      .send({ event: "message", session: "default", payload: { from: "x@c.us", body: "hi", fromMe: true } })
+      .expect(200, { ok: true });
+
+    expect(handler.calls).toHaveLength(0);
   });
 
   it("rejects webhook without secret when secret is configured", async () => {
     const handler = new FakeWebhookHandler();
     const app = createApp(handler, "my-secret");
 
-    await request(app).post("/webhooks/waha").send(PAYLOAD).expect(401);
+    await request(app).post("/webhooks/waha").send(WAHA_PAYLOAD).expect(401);
 
     expect(handler.calls).toHaveLength(0);
   });
@@ -54,7 +86,7 @@ describe("Express app", () => {
     await request(app)
       .post("/webhooks/waha")
       .set("x-webhook-secret", "wrong-secret")
-      .send(PAYLOAD)
+      .send(WAHA_PAYLOAD)
       .expect(401);
 
     expect(handler.calls).toHaveLength(0);
@@ -67,10 +99,52 @@ describe("Express app", () => {
     await request(app)
       .post("/webhooks/waha")
       .set("x-webhook-secret", "my-secret")
-      .send(PAYLOAD)
+      .send(WAHA_PAYLOAD)
       .expect(200, { ok: true });
 
-    expect(handler.calls).toEqual([PAYLOAD]);
+    expect(handler.calls).toHaveLength(1);
+    expect(handler.calls[0]).toMatchObject({ channel: "whatsapp", text: "oi" });
+  });
+
+  it("adapts Telegram updates to IncomingMessage when no secret configured", async () => {
+    const handler = new FakeWebhookHandler();
+    const app = createApp(handler);
+
+    await request(app).post("/webhooks/telegram").send(TELEGRAM_UPDATE).expect(200, { ok: true });
+
+    expect(handler.calls).toHaveLength(1);
+    expect(handler.calls[0]).toMatchObject({
+      channel: "telegram",
+      chatId: "tg:42",
+      text: "oi",
+      identity: { kind: "telegram", value: "42" }
+    });
+  });
+
+  it("rejects Telegram webhook with wrong secret token", async () => {
+    const handler = new FakeWebhookHandler();
+    const app = createApp(handler, undefined, { telegramWebhookSecret: "tg-secret" });
+
+    await request(app)
+      .post("/webhooks/telegram")
+      .set("x-telegram-bot-api-secret-token", "nope")
+      .send(TELEGRAM_UPDATE)
+      .expect(401);
+
+    expect(handler.calls).toHaveLength(0);
+  });
+
+  it("accepts Telegram webhook with correct secret token", async () => {
+    const handler = new FakeWebhookHandler();
+    const app = createApp(handler, undefined, { telegramWebhookSecret: "tg-secret" });
+
+    await request(app)
+      .post("/webhooks/telegram")
+      .set("x-telegram-bot-api-secret-token", "tg-secret")
+      .send(TELEGRAM_UPDATE)
+      .expect(200, { ok: true });
+
+    expect(handler.calls).toHaveLength(1);
   });
 
   it("includes security headers from helmet", async () => {
@@ -91,7 +165,7 @@ describe("Express app", () => {
 
     const responses = await Promise.all(
       Array.from({ length: 5 }, () =>
-        request(app).post("/webhooks/waha").send(PAYLOAD)
+        request(app).post("/webhooks/waha").send(WAHA_PAYLOAD)
       )
     );
 

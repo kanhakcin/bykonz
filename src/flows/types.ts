@@ -1,4 +1,4 @@
-import type { WahaMessagePayload } from "../types/waha";
+import type { IncomingMessage } from "../types/message";
 
 export type FlowStep =
   | "MAIN_MENU"
@@ -24,6 +24,7 @@ export type FlowData = Record<string, unknown>;
 export interface UserRecord {
   id: number;
   phoneE164: string;
+  telegramUserId?: string | null;
   nome?: string | null;
 }
 
@@ -123,6 +124,18 @@ export interface ObraForReport {
 
 export interface ConversationStore {
   findUserByPhone(phoneDigits: string): Promise<UserRecord | null>;
+  findUserByTelegramId(telegramUserId: string): Promise<UserRecord | null>;
+  /**
+   * Vincula o `telegramUserId` a um operador identificado por telefone, para o
+   * auto-vínculo do onboarding. Só grava se o operador ainda não tiver um id de
+   * Telegram (evita sobrescrever/sequestrar vínculo). Devolve o operador
+   * atualizado, ou `null` se o telefone não casar com nenhum usuário ativo.
+   * `alreadyLinked` sinaliza que já havia um vínculo (não sobrescrito).
+   */
+  linkTelegramIdByPhone(input: {
+    phoneCandidates: string[];
+    telegramUserId: string;
+  }): Promise<{ user: UserRecord | null; alreadyLinked: boolean }>;
   findEmpresasByUser(userId: number): Promise<EmpresaRecord[]>;
   findObrasAtivas(): Promise<ObraRecord[]>;
   getState(chatId: string): Promise<ConversationStateRecord | null>;
@@ -169,7 +182,23 @@ export interface MessagingClient {
 }
 
 export interface MediaDownloader {
-  download(url: string): Promise<Buffer>;
+  /**
+   * Baixa a mídia a partir de uma referência opaca do canal.
+   * WAHA: a URL. Telegram: o file_id.
+   */
+  download(ref: string): Promise<Buffer>;
+}
+
+/**
+ * Onboarding específico do canal Telegram: o operador não expõe o telefone ao
+ * bot, então o vínculo do `telegramUserId` é feito pedindo que ele compartilhe
+ * o contato (botão request_contact). Injetado só quando o Telegram está ativo.
+ */
+export interface ChannelOnboarding {
+  /** Envia a mensagem com o botão "compartilhar meu telefone". */
+  promptShareContact(chatId: string): Promise<void>;
+  /** Confirma o vínculo e remove o teclado customizado. */
+  confirmContactLinked(chatId: string, userName?: string | null): Promise<void>;
 }
 
 export interface ObjectStorage {
@@ -216,6 +245,8 @@ export interface ConversationServiceDeps {
   objectStorage: ObjectStorage;
   pdfGenerator: PdfGenerator;
   dailyReport: DailyReportGenerator;
+  /** Onboarding do Telegram (auto-vínculo por contato). Opcional. */
+  channelOnboarding?: ChannelOnboarding;
 }
 
 export interface FlowHandleInput {
@@ -224,7 +255,7 @@ export interface FlowHandleInput {
   user: UserRecord;
   state: ConversationStateRecord;
   text: string;
-  payload: WahaMessagePayload;
+  payload: IncomingMessage;
 }
 
 export interface FlowDefinition {

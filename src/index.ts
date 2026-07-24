@@ -19,7 +19,10 @@ if (config.panelJwtSecret) {
   console.warn("PANEL_JWT_SECRET not set — manager panel API (/api/v1) is disabled.");
 }
 
-const app = createApp(createConversationService(config), config.webhookSecret, { panelRouter });
+const app = createApp(createConversationService(config), config.webhookSecret, {
+  panelRouter,
+  telegramWebhookSecret: config.telegramWebhookSecret
+});
 const PORT = process.env.PORT || 8080;
 
 const server = app.listen(PORT, () => {

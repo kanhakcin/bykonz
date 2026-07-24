@@ -409,6 +409,33 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  // Envia um e-mail de teste para os endereços informados (valida a config SMTP
+  // + destinatários na hora, sem precisar salvar a obra).
+  router.post("/projects/test-email", async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const recipients = parseEmailRecipients((req.body as Record<string, unknown> | null)?.recipients);
+      if (recipients === null) {
+        res.status(400).json({ error: "invalid_payload" });
+        return;
+      }
+
+      try {
+        const result = await service.sendTestEmail(recipients);
+        if (!result.ok) {
+          res.status(400).json({ error: result.code });
+          return;
+        }
+        res.json({ ok: true });
+      } catch (error) {
+        // Falha real de SMTP (host fora, auth, etc.): 502 com código i18n.
+        console.error("[panel] Falha ao enviar e-mail de teste:", error);
+        res.status(502).json({ error: "email.sendFailed" });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.put("/projects/:id", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = parseId(req.params.id);
@@ -1044,7 +1071,16 @@ function parseProjectInput(body: unknown): ProjectInput | null {
     return null;
   }
 
-  const { code, name, context, active, whatsappGroupId, whatsappAutoReportEnabled } = body as Record<string, unknown>;
+  const {
+    code,
+    name,
+    context,
+    active,
+    whatsappGroupId,
+    whatsappAutoReportEnabled,
+    reportEmailRecipients,
+    emailAutoReportEnabled
+  } = body as Record<string, unknown>;
   if (typeof code !== "string" || code.trim() === "" || code.length > 30) {
     return null;
   }
@@ -1063,6 +1099,13 @@ function parseProjectInput(body: unknown): ProjectInput | null {
   if (whatsappAutoReportEnabled !== undefined && typeof whatsappAutoReportEnabled !== "boolean") {
     return null;
   }
+  if (emailAutoReportEnabled !== undefined && typeof emailAutoReportEnabled !== "boolean") {
+    return null;
+  }
+  const emails = parseEmailRecipients(reportEmailRecipients);
+  if (emails === null) {
+    return null;
+  }
 
   return {
     code: code.trim(),
@@ -1070,8 +1113,49 @@ function parseProjectInput(body: unknown): ProjectInput | null {
     context: normalizeOptional(context),
     active: active ?? true,
     whatsappGroupId: normalizeOptional(whatsappGroupId as string | null | undefined),
-    whatsappAutoReportEnabled: whatsappAutoReportEnabled ?? false
+    whatsappAutoReportEnabled: whatsappAutoReportEnabled ?? false,
+    reportEmailRecipients: emails,
+    emailAutoReportEnabled: emailAutoReportEnabled ?? false
   };
+}
+
+/** Limite de segurança para a lista de destinatários de e-mail por obra. */
+const MAX_EMAIL_RECIPIENTS = 20;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Valida e normaliza a lista de e-mails destinatários do relatório. Aceita
+ * ausência/null/[] (sem destinatários). Retorna `null` (inválido) se não for um
+ * array, se houver item que não seja e-mail válido, ou se exceder o limite.
+ * Normaliza: trim, lowercase, remove vazios e duplicados.
+ */
+function parseEmailRecipients(value: unknown): string[] | null {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const normalized: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      return null;
+    }
+    const email = item.trim().toLowerCase();
+    if (email === "") {
+      continue;
+    }
+    if (email.length > 254 || !EMAIL_REGEX.test(email)) {
+      return null;
+    }
+    if (!normalized.includes(email)) {
+      normalized.push(email);
+    }
+  }
+  if (normalized.length > MAX_EMAIL_RECIPIENTS) {
+    return null;
+  }
+  return normalized;
 }
 
 const COVER_CONTENT_TYPES: Record<string, string> = {

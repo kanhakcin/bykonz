@@ -420,13 +420,20 @@ export class PrismaConversationStore implements ConversationStore {
       construtoraNome: project.company?.name ?? null,
       whatsappGroupId: project.whatsappGroupId,
       whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      reportEmailRecipients: project.reportEmailRecipients,
+      emailAutoReportEnabled: project.emailAutoReportEnabled,
       status: project.status
     };
   }
 
   async findObrasForAutoReport(): Promise<ObraForReport[]> {
+    // Canais independentes: seleciona obras ativas com QUALQUER canal de
+    // auto-report habilitado (WhatsApp e/ou e-mail).
     const projects = await this.prisma.project.findMany({
-      where: { status: "ACTIVE", whatsappAutoReportEnabled: true }
+      where: {
+        status: "ACTIVE",
+        OR: [{ whatsappAutoReportEnabled: true }, { emailAutoReportEnabled: true }]
+      }
     });
 
     return projects.map((project) => ({
@@ -434,6 +441,8 @@ export class PrismaConversationStore implements ConversationStore {
       nome: project.name,
       whatsappGroupId: project.whatsappGroupId,
       whatsappAutoReportEnabled: project.whatsappAutoReportEnabled,
+      reportEmailRecipients: project.reportEmailRecipients,
+      emailAutoReportEnabled: project.emailAutoReportEnabled,
       status: project.status
     }));
   }

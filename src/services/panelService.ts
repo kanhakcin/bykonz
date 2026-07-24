@@ -8,6 +8,7 @@
  */
 
 import bcrypt from "bcryptjs";
+import { renderEmailHtml, renderEmailText } from "../lib/emailTemplate";
 
 const PASSWORD_SALT_ROUNDS = 12;
 
@@ -91,6 +92,8 @@ export interface ProjectListItem {
   coverImage: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
 }
 
 export interface ProjectInput {
@@ -100,6 +103,8 @@ export interface ProjectInput {
   active: boolean;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
 }
 
 export interface ProjectListInput {
@@ -439,6 +444,14 @@ export interface DailyReportGenerator {
   ): Promise<{ buffer: Buffer; totalEntradas: number; filename: string | null } | null>;
 }
 
+/** Porta mínima de envio de e-mail usada pelo teste de configuração do painel. */
+export interface PanelMailer {
+  sendMail(input: { to: string[]; subject: string; text: string; html?: string }): Promise<void>;
+}
+
+/** Resultado do teste de e-mail (código i18n para o painel exibir). */
+export type TestEmailResult = { ok: true } | { ok: false; code: "email.notConfigured" | "email.noRecipients" };
+
 export class PanelService {
   constructor(
     private readonly store: PanelStore,
@@ -446,8 +459,39 @@ export class PanelService {
       timezoneOffset?: string;
       mediaStorage?: PanelMediaStorage;
       dailyReportService?: DailyReportGenerator;
+      mailer?: PanelMailer | null;
     } = {}
   ) {}
+
+  /**
+   * Envia um e-mail de teste para os destinatários informados, para validar na
+   * hora a configuração de e-mail da obra (SMTP + endereços). Lança se o envio
+   * falhar (o router traduz para um erro 502); devolve um código quando a
+   * pré-condição não é atendida (SMTP off / lista vazia).
+   */
+  async sendTestEmail(recipients: string[]): Promise<TestEmailResult> {
+    if (!this.options.mailer) {
+      return { ok: false, code: "email.notConfigured" };
+    }
+    if (recipients.length === 0) {
+      return { ok: false, code: "email.noRecipients" };
+    }
+
+    const template = {
+      heading: "Teste de e-mail",
+      paragraphs: [
+        "Este é um e-mail de teste do Diário de Obra.",
+        "Se você recebeu esta mensagem, a configuração de e-mail está funcionando corretamente."
+      ]
+    };
+    await this.options.mailer.sendMail({
+      to: recipients,
+      subject: "Teste de e-mail — Diário de Obra",
+      text: renderEmailText(template),
+      html: renderEmailHtml(template)
+    });
+    return { ok: true };
+  }
 
   private get tzOffset(): string {
     return this.options.timezoneOffset ?? "-03:00";

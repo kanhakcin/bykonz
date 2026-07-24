@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import request from "supertest";
 import bcrypt from "bcryptjs";
 import { createApp, type WebhookHandler } from "../src/app";
@@ -35,6 +35,7 @@ import {
   type PanelUserListItem,
   type PanelUserListResult,
   type PanelUserRecord,
+  type PanelMailer,
   type PanelUserRole,
   type PersonRef,
   type ProjectInput,
@@ -588,7 +589,13 @@ class FakePanelStore implements PanelStore {
   }
 
   private buildProject(input: ProjectInput): ProjectListItem {
-    return { id: this.nextProjectId++, coverImage: null, ...input };
+    return {
+      id: this.nextProjectId++,
+      coverImage: null,
+      reportEmailRecipients: [],
+      emailAutoReportEnabled: false,
+      ...input
+    };
   }
 
   private assertUniqueProjectCode(code: string, exceptId?: number): void {
@@ -774,14 +781,23 @@ class FakeDailyReportGenerator implements DailyReportGenerator {
   }
 }
 
-function buildApp() {
+/** Mailer de teste do painel: captura os envios ou força falha, conforme o caso. */
+let mailerSent: Array<{ to: string[]; subject: string; text: string; html?: string }> = [];
+function buildApp(options: { mailer?: PanelMailer | null } = {}) {
   store = new FakePanelStore();
   storage.downloads = [];
   storage.uploads = [];
+  mailerSent = [];
+  const defaultMailer: PanelMailer = {
+    async sendMail(input) {
+      mailerSent.push(input);
+    }
+  };
   const service = new PanelService(store, {
     timezoneOffset: "-03:00",
     mediaStorage: storage,
-    dailyReportService: new FakeDailyReportGenerator()
+    dailyReportService: new FakeDailyReportGenerator(),
+    mailer: options.mailer === undefined ? defaultMailer : options.mailer
   });
   const panelRouter = createPanelRouter(service, {
     jwtSecret: JWT_SECRET,
@@ -1568,6 +1584,106 @@ describe("projects CRUD", () => {
       whatsappGroupId: "1203630xxxxx@g.us",
       whatsappAutoReportEnabled: true
     });
+  });
+
+  it("creates a project with email recipients and auto-report enabled, normalizing the list", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects")
+      .set(auth)
+      .send({
+        code: "CDL",
+        name: "Obra Candelária",
+        emailAutoReportEnabled: true,
+        // Espaços, maiúsculas, vazios e duplicado — devem ser normalizados.
+        reportEmailRecipients: [" Eng@Empresa.com.br ", "", "cliente@empresa.com.br", "eng@empresa.com.br"]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      emailAutoReportEnabled: true,
+      reportEmailRecipients: ["eng@empresa.com.br", "cliente@empresa.com.br"]
+    });
+  });
+
+  it("rejects a project payload with an invalid email in the recipients list", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects")
+      .set(auth)
+      .send({ code: "CDL", name: "Obra Candelária", reportEmailRecipients: ["não-é-email"] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_payload");
+  });
+
+  it("rejects a project payload where reportEmailRecipients is not an array", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects")
+      .set(auth)
+      .send({ code: "CDL", name: "Obra Candelária", reportEmailRecipients: "a@b.com" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_payload");
+  });
+
+  it("sends a test email to the given recipients", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/v1/projects/test-email")
+      .set(auth)
+      .send({ recipients: [" Eng@Empresa.com.br ", "cliente@empresa.com.br"] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(mailerSent).toHaveLength(1);
+    // Normaliza a lista antes de enviar.
+    expect(mailerSent[0].to).toEqual(["eng@empresa.com.br", "cliente@empresa.com.br"]);
+    // Corpo apresentável: HTML com a marca + fallback texto.
+    expect(mailerSent[0].html).toContain("Diário de Obra");
+    expect(mailerSent[0].text).toContain("Teste de e-mail");
+  });
+
+  it("returns 400 email.noRecipients when the test list is empty", async () => {
+    const app = buildApp();
+    const res = await request(app).post("/api/v1/projects/test-email").set(auth).send({ recipients: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("email.noRecipients");
+    expect(mailerSent).toHaveLength(0);
+  });
+
+  it("returns 400 invalid_payload when a test recipient is not a valid email", async () => {
+    const app = buildApp();
+    const res = await request(app).post("/api/v1/projects/test-email").set(auth).send({ recipients: ["nope"] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_payload");
+  });
+
+  it("returns 400 email.notConfigured when SMTP is not set up", async () => {
+    const app = buildApp({ mailer: null });
+    const res = await request(app).post("/api/v1/projects/test-email").set(auth).send({ recipients: ["a@b.com"] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("email.notConfigured");
+  });
+
+  it("returns 502 email.sendFailed when the mailer throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const app = buildApp({
+      mailer: {
+        async sendMail() {
+          throw new Error("smtp down");
+        }
+      }
+    });
+    const res = await request(app).post("/api/v1/projects/test-email").set(auth).send({ recipients: ["a@b.com"] });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("email.sendFailed");
+    errorSpy.mockRestore();
   });
 
   it("rejects an invalid payload", async () => {

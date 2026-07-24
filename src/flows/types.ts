@@ -139,6 +139,9 @@ export interface ObraForReport {
   construtoraNome?: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  /** Destinatários do relatório por e-mail (auto-report), independente do WhatsApp. */
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
   status: string;
 }
 
@@ -215,6 +218,27 @@ export interface MediaDownloader {
    * WAHA: a URL. Telegram: o file_id.
    */
   download(ref: string): Promise<Buffer>;
+}
+
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
+/**
+ * Porta de envio de e-mail (abstração sobre o transporte SMTP). O job depende
+ * desta interface, não do nodemailer diretamente, para permitir fakes em teste.
+ */
+export interface Mailer {
+  sendMail(input: {
+    to: string[];
+    subject: string;
+    text: string;
+    /** Corpo HTML (opcional). Clientes sem HTML caem no `text`. */
+    html?: string;
+    attachments?: MailAttachment[];
+  }): Promise<void>;
 }
 
 /**

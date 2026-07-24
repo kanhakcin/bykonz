@@ -8,6 +8,8 @@ export const projectFormSchema = z.object({
   active: z.boolean(),
   whatsappGroupId: z.string().optional(),
   whatsappAutoReportEnabled: z.boolean(),
+  reportEmailRecipients: z.array(z.string()),
+  emailAutoReportEnabled: z.boolean(),
 });
 
 export type ProjectFormData = z.infer<typeof projectFormSchema>;
@@ -22,6 +24,8 @@ export interface Project {
   coverImage: string | null;
   whatsappGroupId: string | null;
   whatsappAutoReportEnabled: boolean;
+  reportEmailRecipients: string[];
+  emailAutoReportEnabled: boolean;
 }
 
 export interface ProjectListResponse {

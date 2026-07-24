@@ -78,6 +78,8 @@ function ProjectAddFormContent({ initialData }: { initialData?: Project }) {
       active: initialData.active,
       whatsappGroupId: initialData.whatsappGroupId ?? '',
       whatsappAutoReportEnabled: initialData.whatsappAutoReportEnabled,
+      reportEmailRecipients: initialData.reportEmailRecipients,
+      emailAutoReportEnabled: initialData.emailAutoReportEnabled,
     };
   }, [initialData]);
 

@@ -1,14 +1,39 @@
+import { Loader2, MailCheck } from 'lucide-react';
 import { useFormContext } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import DefaultFormLayout from '@/components/default-form-layout';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { useProjectsApi } from '@/hooks/use-projects-api';
 import type { ProjectFormData } from '../@interface/project.interface';
+
+/** Remove vazios/espaços da lista de e-mails digitada no textarea. */
+function cleanRecipients(value: string[] | undefined): string[] {
+  return (value ?? []).map((email) => email.trim()).filter(Boolean);
+}
 
 export function ProjectForm() {
   const { t } = useTranslation();
   const form = useFormContext<ProjectFormData>();
+  const { testEmail } = useProjectsApi();
+
+  const handleTestEmail = async () => {
+    const recipients = cleanRecipients(form.getValues('reportEmailRecipients'));
+    if (recipients.length === 0) {
+      toast.warning(t('project.testEmail.empty'));
+      return;
+    }
+    try {
+      await testEmail.mutateAsync(recipients);
+      toast.success(t('project.testEmail.success'));
+    } catch {
+      // Erros HTTP (SMTP off, envio falhou, e-mail inválido) já geram toast no client da API.
+    }
+  };
 
   const sections = [
     {
@@ -102,6 +127,61 @@ export function ProjectForm() {
               </FormControl>
               <div className="space-y-1 leading-none">
                 <FormLabel>{t('project.whatsappAutoReportEnabled')}</FormLabel>
+              </div>
+            </FormItem>
+          )}
+        />,
+      ],
+    },
+    {
+      title: t('email'),
+      fields: [
+        <FormField
+          key="reportEmailRecipients"
+          control={form.control}
+          name="reportEmailRecipients"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('project.reportEmailRecipients')}</FormLabel>
+              <FormControl>
+                <Textarea
+                  rows={4}
+                  placeholder={'engenheiro@empresa.com.br\ncliente@empresa.com.br'}
+                  value={(field.value ?? []).join('\n')}
+                  onChange={(event) => field.onChange(event.target.value.split('\n'))}
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  ref={field.ref}
+                />
+              </FormControl>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-muted-foreground text-sm">{t('project.reportEmailRecipients.help')}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestEmail}
+                  disabled={testEmail.isPending || cleanRecipients(field.value).length === 0}
+                >
+                  {testEmail.isPending ? <Loader2 className="animate-spin" /> : <MailCheck />}
+                  {t('project.testEmail')}
+                </Button>
+              </div>
+              <FormMessage />
+            </FormItem>
+          )}
+        />,
+        <FormField
+          key="emailAutoReportEnabled"
+          control={form.control}
+          name="emailAutoReportEnabled"
+          render={({ field }) => (
+            <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+              <FormControl>
+                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+              </FormControl>
+              <div className="space-y-1 leading-none">
+                <FormLabel>{t('project.emailAutoReportEnabled')}</FormLabel>
               </div>
             </FormItem>
           )}

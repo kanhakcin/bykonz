@@ -42,6 +42,11 @@ async function deleteProject(id: number): Promise<void> {
   await api.delete(`/projects/${id}`);
 }
 
+/** Envia um e-mail de teste para os endereços informados (valida SMTP + destinatários). */
+async function testProjectEmail(recipients: string[]): Promise<void> {
+  await api.post('/projects/test-email', { recipients });
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -120,10 +125,15 @@ export function useProjectsApi() {
     onSuccess: (_data, variables) => invalidate(variables.id),
   });
 
+  const testEmailMutation = useMutation({
+    mutationFn: testProjectEmail,
+  });
+
   return {
     createProject: createProjectMutation,
     updateProject: updateProjectMutation,
     deleteProject: deleteProjectMutation,
     uploadCover: uploadCoverMutation,
+    testEmail: testEmailMutation,
   };
 }

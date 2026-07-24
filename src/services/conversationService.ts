@@ -19,6 +19,8 @@ export type {
   FlowDefinition,
   FlowHandleInput,
   FlowStep,
+  MailAttachment,
+  Mailer,
   MediaDownloader,
   MessagingClient,
   NormaRecord,

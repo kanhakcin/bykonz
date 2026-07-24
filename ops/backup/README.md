@@ -17,6 +17,93 @@ fora da VPS.
 > `server DB` precisa de **saída HTTPS para o S3**. Só rode no `server APP` se o
 > `server DB` não tiver rota para o S3 — aí você paga versão de client + tráfego de rede.
 
+---
+
+## Estado atual em produção (VPS) — configurado em 2026-07-24
+
+Como o `server DB` não tem o repositório clonado e o `backup-db.sh` **acompanha o
+deploy da app** (fica versionado no repo → atualiza sozinho a cada deploy, sem drift),
+optou-se por rodar o backup no **`server APP`**, que já alcança o banco pela rede (mesma
+`DATABASE_URL` da aplicação). O dump é remoto (APP → server DB); as versões do
+`pg_dump` e do servidor batem (**Postgres 16.14** dos dois lados), então não há
+incompatibilidade.
+
+### Topologia real
+- **Host que executa o backup:** `server APP` (`vmi3436914`), usuário **`app1cano`**.
+- **App:** roda em Docker (container `bykonz-services-app-1`); repo em
+  `/home/app1cano/bykonz-services`. O backup roda **no host** (fora do container).
+- **Banco:** Postgres **nativo** num **server DB separado**, acessado remotamente pela
+  `DATABASE_URL` (a mesma que a app usa — **não** é `localhost` aqui).
+
+### Caminhos e artefatos
+| O quê | Caminho |
+|---|---|
+| Script (versionado, atualiza no deploy) | `/home/app1cano/bykonz-services/ops/backup/backup-db.sh` |
+| Config com segredos (**fora do repo**, `chmod 600`) | `/home/app1cano/diario-backup.env` |
+| Passphrase do gpg (`chmod 600`, dono `app1cano`) | `/home/app1cano/.diario-backup-pass` |
+| Dumps locais (retenção 7 dias) | `/home/app1cano/diario-backup-local/` |
+| Log do cron | `/home/app1cano/diario-backup.log` |
+
+> A config e a passphrase ficam **fora do repo** de propósito, para sobreviverem a
+> deploys (`git pull`/`git clean`). Uma **cópia da passphrase** está guardada **fora da
+> VPS** (gerenciador de senhas) — sem ela o backup é irrecuperável.
+
+### Config em uso (`/home/app1cano/diario-backup.env`)
+- `DATABASE_URL` → conexão **remota** do server DB.
+- `BACKUP_S3_BUCKET="bykonz-service"` + `S3_PREFIX="backups/db"` → destino final
+  `s3://bykonz-service/backups/db/AAAA/MM/…`.
+- `ENCRYPTION_MODE="gpg-passphrase"`, `GPG_PASSPHRASE_FILE="/home/app1cano/.diario-backup-pass"`.
+- `LOCAL_BACKUP_DIR="/home/app1cano/diario-backup-local"` (o default `/var/backups/...`
+  exige root — trocado para o home).
+- Credenciais AWS: **reutilizando as da app** por ora (ver TODO de segurança).
+
+> **Bucket compartilhado com a mídia (temporário).** Por decisão de agilidade, os
+> backups vão no **mesmo bucket** das imagens, isolados pelo prefixo `backups/db/`.
+> **Versioning está habilitado** no bucket como proteção mínima. Isso abre mão da
+> separação de *blast radius* (a credencial da app alcança os backups) — ver TODO.
+
+### Agendamento (crontab do `app1cano`)
+```cron
+PATH=/usr/local/bin:/usr/bin:/bin
+0 3 * * * BACKUP_CONFIG=/home/app1cano/diario-backup.env /bin/bash /home/app1cano/bykonz-services/ops/backup/backup-db.sh >> /home/app1cano/diario-backup.log 2>&1
+```
+Roda **03:00 (horário do servidor)**, diariamente.
+
+### Dependências instaladas no host
+`postgresql-client` (16), `gnupg`, `curl`, `unzip` e **AWS CLI v2** (instalador oficial
+em `/usr/local/bin/aws`; o pacote `awscli` do apt **não existe** no Ubuntu 24.04 Noble).
+
+### Validação feita
+- ✅ Backup manual rodou fim-a-fim (dump → gpg → upload no S3).
+- ✅ **Restore testado** num Postgres descartável (`docker run --rm postgres:16`):
+  descriptografia + `pg_restore` + conferência de tabelas/linhas.
+- ✅ Execução validada no **ambiente enxuto do cron**
+  (`env -i PATH=/usr/local/bin:/usr/bin:/bin …`).
+
+### Gotchas encontrados (e como foram resolvidos)
+1. **`awscli` do apt indisponível no Ubuntu 24.04 (Noble)** → instalado o AWS CLI **v2**
+   pelo instalador oficial (fica em `/usr/local/bin/aws`).
+2. **`Permission denied` ao executar o script** → o arquivo veio do deploy **sem bit
+   `+x`**. Solução: invocar via `/bin/bash <script>` (o cron faz isso), tornando o bit
+   irrelevante e imune a deploys.
+3. **Pedia permissão em `/var/backups`** → default do exemplo apontava para diretório de
+   root; trocado `LOCAL_BACKUP_DIR` para o home do `app1cano`.
+4. **`aws` não encontrado no cron** → o cron usa `PATH` mínimo (`/usr/bin:/bin`) e o
+   `aws` está em `/usr/local/bin`. Resolvido com a linha `PATH=` no topo do crontab.
+
+### TODO / pendências de robustez
+- [ ] **`HEALTHCHECK_URL`** (dead man's switch) no `diario-backup.env` — sem isso, uma
+      falha do cron passa despercebida.
+- [ ] **Regra de lifecycle** no S3 escopada ao prefixo `backups/db/` (expira backups
+      antigos; cuidado: `put-bucket-lifecycle-configuration` substitui a config inteira
+      do bucket — mesclar com regras existentes).
+- [ ] **Migrar para um bucket dedicado** (separa credencial/*blast radius*; idealmente
+      outra conta/região e Object Lock). Basta mover o prefixo `backups/db/`.
+- [ ] **IAM least-privilege** (credencial só-`PutObject` no destino, em vez das chaves da
+      app).
+
+---
+
 ## Arquivos
 
 | Arquivo | O quê |

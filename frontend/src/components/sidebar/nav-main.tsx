@@ -3,8 +3,12 @@ import type { ReactNode } from 'react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from '@/components/ui/sidebar';
+import { useAuth } from '@/hooks/use-auth';
 import { buildSidebarRoutes } from '@/lib/config/sidebar-routes.config';
 import { cn } from '@/lib/utils/cn.util';
+
+// Rotas restritas a ADMIN (o backend também protege — ver requirePanelRole).
+const ADMIN_ONLY_ROUTE_IDS = new Set(['logs']);
 
 function convertToNavRoutes(routes: ReturnType<typeof buildSidebarRoutes>, t: (key: string) => string): Route[] {
   return routes.map((route) => ({
@@ -20,8 +24,13 @@ export default function AppNavigation() {
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
   const matchRoute = useMatchRoute();
+  const role = useAuth((s) => s.user?.role);
 
-  const routes = useMemo(() => convertToNavRoutes(buildSidebarRoutes(), t), [t]);
+  const routes = useMemo(() => {
+    const isAdmin = role === 'ADMIN';
+    const visible = buildSidebarRoutes().filter((route) => isAdmin || !ADMIN_ONLY_ROUTE_IDS.has(route.id));
+    return convertToNavRoutes(visible, t);
+  }, [t, role]);
 
   return (
     <SidebarMenu>

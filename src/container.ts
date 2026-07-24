@@ -1,6 +1,7 @@
 import type { AppConfig } from "./config/env";
 import { WahaClient } from "./lib/wahaClient";
 import { MailClient } from "./lib/mailClient";
+import { PrismaAuditLogger } from "./services/prismaAuditLogger";
 import { TelegramClient } from "./lib/telegramClient";
 import { ChannelRouterClient } from "./lib/channelRouterClient";
 import { TelegramOnboardingClient } from "./lib/telegramOnboarding";
@@ -46,6 +47,7 @@ export function createConversationService(config: AppConfig): ConversationServic
     objectStorage,
     pdfGenerator,
     channelOnboarding: onboarding,
+    auditLogger: new PrismaAuditLogger(prisma),
     // Mesmo gerador do painel: o menu "Gerar diario de obra" envia o PDF
     // idêntico ao baixado em /relatorios.
     dailyReport: new DailyReportService(store, pdfGenerator, {
@@ -69,7 +71,8 @@ export function createPanelService(config: AppConfig): PanelService {
     timezoneOffset: config.panelTimezoneOffset,
     mediaStorage: objectStorage,
     dailyReportService: createDailyReportService(config),
-    mailer: MailClient.fromConfig(config)
+    mailer: MailClient.fromConfig(config),
+    auditLogger: new PrismaAuditLogger(prisma)
   });
 }
 
@@ -82,6 +85,7 @@ export function createDailyReportJobDeps(config: AppConfig): DailyReportJobDeps 
     dailyReportService: createDailyReportService(config),
     store: new PrismaConversationStore(prisma),
     messaging: createRoutedMessaging(config).messaging,
-    mailer: MailClient.fromConfig(config)
+    mailer: MailClient.fromConfig(config),
+    auditLogger: new PrismaAuditLogger(prisma)
   };
 }

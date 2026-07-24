@@ -4,6 +4,9 @@ import type { IncomingMessage } from "../types/message";
 import { getWahaPhoneLookupCandidates } from "../utils/phone";
 
 export type {
+  AuditActorType,
+  AuditLogEntry,
+  AuditLogger,
   ChannelOnboarding,
   ConversationServiceDeps,
   ConversationStateRecord,

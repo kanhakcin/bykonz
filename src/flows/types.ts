@@ -241,6 +241,31 @@ export interface Mailer {
   }): Promise<void>;
 }
 
+export type AuditActorType = "SYSTEM" | "PANEL_USER" | "BOT_USER";
+
+export interface AuditLogEntry {
+  actorType: AuditActorType;
+  /** id do ator (PanelUser/User) como string; ausente para SYSTEM. */
+  actorId?: string | null;
+  /** rótulo legível: e-mail do painel, ou nome/telefone do operador do bot. */
+  actorLabel?: string | null;
+  /** ação, ex.: "report.email.sent". */
+  action: string;
+  status?: "OK" | "ERROR";
+  entityType?: string | null;
+  entityId?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * Trilha de auditoria. `record` é best-effort: NUNCA lança — uma falha de
+ * gravação é só logada, para não derrubar o fluxo principal (envio de relatório
+ * etc.). O job/painel/bot dependem desta porta, não do Prisma direto.
+ */
+export interface AuditLogger {
+  record(entry: AuditLogEntry): Promise<void>;
+}
+
 /**
  * Onboarding específico do canal Telegram: o operador não expõe o telefone ao
  * bot, então o vínculo do `telegramUserId` é feito pedindo que ele compartilhe
@@ -299,6 +324,8 @@ export interface ConversationServiceDeps {
   dailyReport: DailyReportGenerator;
   /** Onboarding do Telegram (auto-vínculo por contato). Opcional. */
   channelOnboarding?: ChannelOnboarding;
+  /** Trilha de auditoria (opcional; best-effort). */
+  auditLogger?: AuditLogger | null;
 }
 
 export interface FlowHandleInput {

@@ -184,6 +184,27 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
+  // Trilha de auditoria (fase 1: relatórios). Só ADMIN.
+  router.get("/audit-logs", requirePanelRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const search =
+        typeof req.query.search === "string" && req.query.search.trim() !== "" ? req.query.search.trim() : undefined;
+      const action =
+        typeof req.query.action === "string" && req.query.action.trim() !== "" ? req.query.action.trim() : undefined;
+      const page = parsePositiveInt(req.query.page, 0);
+      const size = parsePositiveInt(req.query.size, 20);
+
+      if (page === null || size === null || size < 1 || size > 100) {
+        res.status(400).json({ error: "invalid_pagination" });
+        return;
+      }
+
+      res.json(await service.listAuditLogs({ search, action, page, size }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/standards/:id", async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = parseId(req.params.id);
@@ -306,7 +327,7 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
     }
   });
 
-  router.get("/projects/:id/report", async (req: Request, res: Response, next: NextFunction) => {
+  router.get("/projects/:id/report", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const id = parseId(req.params.id);
       if (id === null) {
@@ -327,6 +348,15 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
       }
 
       const filename = result.filename ?? `diario-obra-${id}-${date}.pdf`;
+      // Auditoria: quem baixou o relatório pelo painel (best-effort, não bloqueia).
+      if (req.panelUser) {
+        await service.recordReportDownloaded({
+          actor: { id: req.panelUser.sub, email: req.panelUser.email },
+          obraId: id,
+          date,
+          filename
+        });
+      }
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.send(result.buffer);

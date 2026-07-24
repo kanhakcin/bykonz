@@ -8,7 +8,8 @@ import type {
   FlowHandleInput,
   NormaRecord,
   ObraRecord,
-  SaveConversationStateInput
+  SaveConversationStateInput,
+  UserRecord
 } from "../types";
 import { grupoCaptionText, normaLabel, normaMenuText, photoPromptText } from "./categoriaEntrada";
 import {
@@ -156,7 +157,7 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         await this.handleReportDate(input.chatId, input.phoneE164, state, input.text);
         return;
       case DIARIO_OBRA_FLOW_STEPS.awaitingDate:
-        await this.handleDiarioObraDate(input.chatId, input.phoneE164, state, input.text);
+        await this.handleDiarioObraDate(input.chatId, input.phoneE164, state, input.text, input.user);
         return;
       case "SELECT_EMPRESA_FOR_TRAINING":
         await this.handleEmpresaSelectionForTraining(input.chatId, input.phoneE164, input.user.id, state, input.text);
@@ -1420,7 +1421,8 @@ export class DiarioDasObrasFlow implements FlowDefinition {
     chatId: string,
     phoneE164: string,
     state: ConversationStateRecord,
-    text: string
+    text: string,
+    user: UserRecord
   ): Promise<void> {
     const obraId = state.selectedObraId;
     const obraNome = state.selectedObraNome;
@@ -1449,11 +1451,27 @@ export class DiarioDasObrasFlow implements FlowDefinition {
       return;
     }
 
+    const filename = result.filename ?? `diario-obra-${obraId}-${isoDate}.pdf`;
     await this.deps.messaging.sendFile(chatId, {
       mimetype: "application/pdf",
-      filename: result.filename ?? `diario-obra-${obraId}-${isoDate}.pdf`,
+      filename,
       data: result.buffer.toString("base64")
     });
+
+    // Auditoria: geração manual do diário pelo bot (best-effort, nunca quebra).
+    try {
+      await this.deps.auditLogger?.record({
+        actorType: "BOT_USER",
+        actorId: user.id ? String(user.id) : null,
+        actorLabel: user.nome ?? phoneE164,
+        action: "report.generated.bot",
+        entityType: "PROJECT",
+        entityId: String(obraId),
+        metadata: { obraNome, date: isoDate, filename, totalEntradas: result.totalEntradas }
+      });
+    } catch (error) {
+      console.error("Failed to audit bot report generation", error);
+    }
 
     await this.goToMainMenu(chatId, phoneE164, obraId, obraNome);
   }

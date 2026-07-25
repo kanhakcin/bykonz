@@ -75,6 +75,31 @@ export class TelegramClient implements MessagingClient, MediaDownloader {
     }
   }
 
+  async sendImage(
+    chatId: string,
+    file: { mimetype: string; filename?: string; data: string },
+    caption?: string
+  ): Promise<void> {
+    // sendPhoto entrega a imagem inline (com preview), diferente de sendDocument.
+    const form = new FormData();
+    form.append("chat_id", stripPrefix(chatId));
+    if (caption) {
+      form.append("caption", caption);
+    }
+    const buffer = Buffer.from(file.data, "base64");
+    const blob = new Blob([buffer], { type: file.mimetype });
+    form.append("photo", blob, file.filename ?? "foto.jpg");
+
+    const response = await fetch(`${this.apiBase}/sendPhoto`, {
+      method: "POST",
+      body: form
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram sendPhoto failed with ${response.status}: ${await response.text()}`);
+    }
+  }
+
   /**
    * O Telegram não entrega URL: entrega um `file_id` que precisa ser resolvido
    * em `file_path` via `getFile` antes de baixar do endpoint de arquivos.

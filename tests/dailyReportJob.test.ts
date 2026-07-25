@@ -19,15 +19,20 @@ function makeObra(overrides: Partial<ObraForReport> = {}): ObraForReport {
 function makeMessaging(): MessagingClient & {
   messages: Array<{ chatId: string; text: string }>;
   files: Array<{ chatId: string; file: { mimetype: string; filename: string; data: string } }>;
+  images: Array<{ chatId: string; file: { mimetype: string; filename?: string; data: string } }>;
 } {
   return {
     messages: [],
     files: [],
+    images: [],
     async sendText(chatId, text) {
       this.messages.push({ chatId, text });
     },
     async sendFile(chatId, file) {
       this.files.push({ chatId, file });
+    },
+    async sendImage(chatId, file) {
+      this.images.push({ chatId, file });
     }
   };
 }

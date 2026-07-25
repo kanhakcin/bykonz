@@ -64,7 +64,8 @@ function makeService(store: ConversationStore, onboarding?: ChannelOnboarding) {
       sendText: async (chatId, text) => {
         sent.push({ chatId, text });
       },
-      sendFile: async () => {}
+      sendFile: async () => {},
+      sendImage: async () => {}
     },
     mediaDownloader: { download: async () => Buffer.from("") },
     objectStorage: {} as never,

@@ -68,6 +68,26 @@ describe("TelegramClient", () => {
     expect(form.get("document")).toBeInstanceOf(Blob);
   });
 
+  it("sends an inline photo via multipart sendPhoto", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new TelegramClient(TOKEN);
+    await client.sendImage(
+      `${TELEGRAM_CHAT_PREFIX}555`,
+      { mimetype: "image/jpeg", filename: "foto.jpg", data: Buffer.from("img-bytes").toString("base64") },
+      "Fiada 1"
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendPhoto`);
+    const form = init.body as FormData;
+    expect(form.get("chat_id")).toBe("555");
+    expect(form.get("caption")).toBe("Fiada 1");
+    expect(form.get("photo")).toBeInstanceOf(Blob);
+  });
+
   it("downloads media via getFile then the file endpoint, stripping the tg: prefix", async () => {
     const fetchMock = vi
       .fn()

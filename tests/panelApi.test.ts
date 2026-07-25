@@ -20,6 +20,9 @@ import {
   type AlertRecord,
   type AssetInput,
   type AssetListInput,
+  type AuditLogListInput,
+  type AuditLogListResult,
+  type AuditLogRecord,
   type AssetListResult,
   type AssetRecord,
   type AssetTypeRef,
@@ -77,6 +80,32 @@ class FakePanelStore implements PanelStore {
   standards: CodeRef[] = [{ id: 24, code: "PS-024" }];
   standardRecords: StandardRecord[] = [];
   standardsInUse = new Set<number>();
+  auditLogRecords: AuditLogRecord[] = [
+    {
+      id: "2",
+      actorType: "SYSTEM",
+      actorId: null,
+      actorLabel: "Auto-report (agendado)",
+      action: "report.email.sent",
+      status: "OK",
+      entityType: "PROJECT",
+      entityId: "1",
+      metadata: { recipients: ["a@b.com"], filename: "f.pdf" },
+      createdAt: new Date("2026-07-06T21:00:00Z")
+    },
+    {
+      id: "1",
+      actorType: "PANEL_USER",
+      actorId: "1",
+      actorLabel: "gestor@tanen.com.br",
+      action: "report.downloaded.panel",
+      status: "OK",
+      entityType: "PROJECT",
+      entityId: "1",
+      metadata: { date: "2026-07-06", filename: "f.pdf" },
+      createdAt: new Date("2026-07-06T20:00:00Z")
+    }
+  ];
   private nextStandardId = 1;
   assetRecords: AssetRecord[] = [];
   assetTypes: AssetTypeRef[] = [];
@@ -354,6 +383,22 @@ class FakePanelStore implements PanelStore {
     const filtered = this.standardRecords
       .filter((s) => !search || s.code.toLowerCase().includes(search) || s.title.toLowerCase().includes(search))
       .sort((a, b) => a.code.localeCompare(b.code));
+
+    return {
+      data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
+      totalCount: filtered.length
+    };
+  }
+
+  async listAuditLogs(input: AuditLogListInput): Promise<AuditLogListResult> {
+    const filtered = this.auditLogRecords
+      .filter((log) => !input.action || log.action === input.action)
+      .filter(
+        (log) =>
+          !input.search ||
+          (log.actorLabel ?? "").toLowerCase().includes(input.search.toLowerCase()) ||
+          (log.entityId ?? "").toLowerCase().includes(input.search.toLowerCase())
+      );
 
     return {
       data: filtered.slice(input.page * input.size, (input.page + 1) * input.size),
@@ -2151,5 +2196,41 @@ describe("whatsapp users CRUD", () => {
 
     const companies = await request(app).get("/api/v1/companies").set("Authorization", `Bearer ${managerToken}`);
     expect(companies.status).toBe(403);
+  });
+});
+
+describe("panel API audit logs", () => {
+  it("lists audit logs for an ADMIN, newest first", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/audit-logs").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(2);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0].action).toBe("report.email.sent");
+    expect(res.body.data[0].metadata).toMatchObject({ recipients: ["a@b.com"] });
+  });
+
+  it("filters by action", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/audit-logs?action=report.downloaded.panel").set(auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.data[0].action).toBe("report.downloaded.panel");
+  });
+
+  it("rejects a MANAGER with 403", async () => {
+    const app = buildApp();
+    const managerToken = tokenFor({ id: 2, email: "gerente@tanen.com.br", name: "Gerente", role: "MANAGER" });
+    const res = await request(app).get("/api/v1/audit-logs").set("Authorization", `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/api/v1/audit-logs");
+    expect(res.status).toBe(401);
   });
 });

@@ -623,3 +623,24 @@ model WhatsappConversationState {
 
   @@map("whatsapp_conversation_states")
 }
+
+// Trilha de auditoria (fase 1: relatórios). Polimórfico e sem FK física — o
+// ator/entidade variam entre painel (PanelUser), bot (User) e cron (SYSTEM),
+// e os ids das entidades são de tipos mistos (Int/BigInt), então guardamos
+// como String. Gravação é best-effort e nunca bloqueia o fluxo principal.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorType  String   @map("actor_type") // SYSTEM | PANEL_USER | BOT_USER
+  actorId    String?  @map("actor_id")
+  actorLabel String?  @map("actor_label") // e-mail do painel, ou nome/telefone do operador
+  action     String // ex.: report.email.sent
+  status     String   @default("OK") // OK | ERROR
+  entityType String?  @map("entity_type") // ex.: PROJECT
+  entityId   String?  @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

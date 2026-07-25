@@ -15,6 +15,7 @@ import { Route as PrivateIndexRouteImport } from './routes/_private/index';
 import { Route as PublicAuthIndexRouteImport } from './routes/_public/auth/index';
 import { Route as PrivateRelatoriosIndexRouteImport } from './routes/_private/relatorios/index';
 import { Route as PrivatePainelIndexRouteImport } from './routes/_private/painel/index';
+import { Route as PrivateLogsIndexRouteImport } from './routes/_private/logs/index';
 import { Route as PrivateCadastrosIndexRouteImport } from './routes/_private/cadastros/index';
 import { Route as PrivateCadastrosUsuariosIndexRouteImport } from './routes/_private/cadastros/usuarios/index';
 import { Route as PrivateCadastrosPessoasIndexRouteImport } from './routes/_private/cadastros/pessoas/index';
@@ -54,6 +55,11 @@ const PrivateRelatoriosIndexRoute = PrivateRelatoriosIndexRouteImport.update({
 const PrivatePainelIndexRoute = PrivatePainelIndexRouteImport.update({
   id: '/painel/',
   path: '/painel/',
+  getParentRoute: () => PrivateRoute,
+} as any);
+const PrivateLogsIndexRoute = PrivateLogsIndexRouteImport.update({
+  id: '/logs/',
+  path: '/logs/',
   getParentRoute: () => PrivateRoute,
 } as any);
 const PrivateCadastrosIndexRoute = PrivateCadastrosIndexRouteImport.update({
@@ -131,6 +137,7 @@ const PrivateCadastrosAtivosAddIndexRoute =
 export interface FileRoutesByFullPath {
   '/': typeof PrivateIndexRoute;
   '/cadastros/': typeof PrivateCadastrosIndexRoute;
+  '/logs/': typeof PrivateLogsIndexRoute;
   '/painel/': typeof PrivatePainelIndexRoute;
   '/relatorios/': typeof PrivateRelatoriosIndexRoute;
   '/auth/': typeof PublicAuthIndexRoute;
@@ -149,6 +156,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof PrivateIndexRoute;
   '/cadastros': typeof PrivateCadastrosIndexRoute;
+  '/logs': typeof PrivateLogsIndexRoute;
   '/painel': typeof PrivatePainelIndexRoute;
   '/relatorios': typeof PrivateRelatoriosIndexRoute;
   '/auth': typeof PublicAuthIndexRoute;
@@ -170,6 +178,7 @@ export interface FileRoutesById {
   '/_public': typeof PublicRouteWithChildren;
   '/_private/': typeof PrivateIndexRoute;
   '/_private/cadastros/': typeof PrivateCadastrosIndexRoute;
+  '/_private/logs/': typeof PrivateLogsIndexRoute;
   '/_private/painel/': typeof PrivatePainelIndexRoute;
   '/_private/relatorios/': typeof PrivateRelatoriosIndexRoute;
   '/_public/auth/': typeof PublicAuthIndexRoute;
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/cadastros/'
+    | '/logs/'
     | '/painel/'
     | '/relatorios/'
     | '/auth/'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/cadastros'
+    | '/logs'
     | '/painel'
     | '/relatorios'
     | '/auth'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/_public'
     | '/_private/'
     | '/_private/cadastros/'
+    | '/_private/logs/'
     | '/_private/painel/'
     | '/_private/relatorios/'
     | '/_public/auth/'
@@ -291,6 +303,13 @@ declare module '@tanstack/react-router' {
       path: '/painel';
       fullPath: '/painel/';
       preLoaderRoute: typeof PrivatePainelIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
+    };
+    '/_private/logs/': {
+      id: '/_private/logs/';
+      path: '/logs';
+      fullPath: '/logs/';
+      preLoaderRoute: typeof PrivateLogsIndexRouteImport;
       parentRoute: typeof PrivateRoute;
     };
     '/_private/cadastros/': {
@@ -383,6 +402,7 @@ declare module '@tanstack/react-router' {
 interface PrivateRouteChildren {
   PrivateIndexRoute: typeof PrivateIndexRoute;
   PrivateCadastrosIndexRoute: typeof PrivateCadastrosIndexRoute;
+  PrivateLogsIndexRoute: typeof PrivateLogsIndexRoute;
   PrivatePainelIndexRoute: typeof PrivatePainelIndexRoute;
   PrivateRelatoriosIndexRoute: typeof PrivateRelatoriosIndexRoute;
   PrivateCadastrosAtivosIndexRoute: typeof PrivateCadastrosAtivosIndexRoute;
@@ -401,6 +421,7 @@ interface PrivateRouteChildren {
 const PrivateRouteChildren: PrivateRouteChildren = {
   PrivateIndexRoute: PrivateIndexRoute,
   PrivateCadastrosIndexRoute: PrivateCadastrosIndexRoute,
+  PrivateLogsIndexRoute: PrivateLogsIndexRoute,
   PrivatePainelIndexRoute: PrivatePainelIndexRoute,
   PrivateRelatoriosIndexRoute: PrivateRelatoriosIndexRoute,
   PrivateCadastrosAtivosIndexRoute: PrivateCadastrosAtivosIndexRoute,

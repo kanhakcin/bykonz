@@ -1,7 +1,13 @@
 import cron from "node-cron";
 import type { AppConfig } from "../config/env";
 import type { DailyReportResult, DailyReportService } from "../services/dailyReportService";
-import type { ConversationStore, Mailer, MessagingClient, ObraForReport } from "../services/conversationService";
+import type {
+  AuditLogger,
+  ConversationStore,
+  Mailer,
+  MessagingClient,
+  ObraForReport
+} from "../services/conversationService";
 import { renderEmailHtml, renderEmailText } from "../lib/emailTemplate";
 
 export interface DailyReportJobDeps {
@@ -10,6 +16,39 @@ export interface DailyReportJobDeps {
   messaging: MessagingClient;
   /** Canal de e-mail (opcional). Null quando o SMTP não está configurado. */
   mailer?: Mailer | null;
+  /** Trilha de auditoria (opcional; best-effort). */
+  auditLogger?: AuditLogger | null;
+}
+
+/** Registra um evento de auditoria do job (ator SYSTEM = cron). No-op se não injetado. */
+async function audit(
+  deps: DailyReportJobDeps,
+  entry: {
+    action: string;
+    status?: "OK" | "ERROR";
+    obra: ObraForReport;
+    date: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  if (!deps.auditLogger) {
+    return;
+  }
+  // Defensivo: a auditoria nunca pode derrubar o envio, mesmo que o logger
+  // injetado viole o contrato best-effort e lance.
+  try {
+    await deps.auditLogger.record({
+      actorType: "SYSTEM",
+      actorLabel: "Auto-report (agendado)",
+      action: entry.action,
+      status: entry.status ?? "OK",
+      entityType: "PROJECT",
+      entityId: String(entry.obra.id),
+      metadata: { obraNome: entry.obra.nome, date: entry.date, ...entry.metadata }
+    });
+  } catch (error) {
+    console.error("[dailyReportJob] Falha ao auditar evento:", error);
+  }
 }
 
 export async function runDailyReportJob(deps: DailyReportJobDeps, referenceDate: string = todayISOSaoPaulo()): Promise<void> {
@@ -21,6 +60,15 @@ export async function runDailyReportJob(deps: DailyReportJobDeps, referenceDate:
       if (!result) {
         console.error(`[dailyReportJob] Obra ${obra.id} não encontrada ao gerar relatório.`);
         continue;
+      }
+
+      if (result.totalEntradas > 0) {
+        await audit(deps, {
+          action: "report.generated",
+          obra,
+          date: referenceDate,
+          metadata: { filename: result.filename, totalEntradas: result.totalEntradas, origem: "cron" }
+        });
       }
 
       // Canais independentes: WhatsApp e e-mail são disparados separadamente,
@@ -59,14 +107,28 @@ async function sendWhatsapp(
       return;
     }
 
+    const filename = result.filename ?? `diario-obra-${referenceDate}.pdf`;
     await deps.messaging.sendFile(obra.whatsappGroupId, {
       mimetype: "application/pdf",
-      filename: result.filename ?? `diario-obra-${referenceDate}.pdf`,
+      filename,
       data: result.buffer.toString("base64")
     });
     await deps.messaging.sendText(obra.whatsappGroupId, "✅ Diário de obra gerado e enviado automaticamente.");
+    await audit(deps, {
+      action: "report.whatsapp.sent",
+      obra,
+      date: referenceDate,
+      metadata: { whatsappGroupId: obra.whatsappGroupId, filename }
+    });
   } catch (error) {
     console.error(`[dailyReportJob] Falha ao enviar WhatsApp da obra ${obra.id} (${obra.nome}):`, error);
+    await audit(deps, {
+      action: "report.whatsapp.failed",
+      status: "ERROR",
+      obra,
+      date: referenceDate,
+      metadata: { whatsappGroupId: obra.whatsappGroupId, error: errorMessage(error) }
+    });
   }
 }
 
@@ -111,9 +173,26 @@ async function sendEmail(
       html: renderEmailHtml(template),
       attachments: [{ filename, content: result.buffer, contentType: "application/pdf" }]
     });
+    await audit(deps, {
+      action: "report.email.sent",
+      obra,
+      date: referenceDate,
+      metadata: { recipients: obra.reportEmailRecipients, filename }
+    });
   } catch (error) {
     console.error(`[dailyReportJob] Falha ao enviar e-mail da obra ${obra.id} (${obra.nome}):`, error);
+    await audit(deps, {
+      action: "report.email.failed",
+      status: "ERROR",
+      obra,
+      date: referenceDate,
+      metadata: { recipients: obra.reportEmailRecipients, error: errorMessage(error) }
+    });
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function scheduleDailyReportJob(config: AppConfig, deps: DailyReportJobDeps): void {

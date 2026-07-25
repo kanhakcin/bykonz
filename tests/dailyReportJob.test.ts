@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { runDailyReportJob, type DailyReportJobDeps } from "../src/jobs/dailyReportJob";
 import type { DailyReportService } from "../src/services/dailyReportService";
-import type { Mailer, MessagingClient, ObraForReport } from "../src/services/conversationService";
+import type { AuditLogEntry, AuditLogger, Mailer, MessagingClient, ObraForReport } from "../src/services/conversationService";
 
 function makeObra(overrides: Partial<ObraForReport> = {}): ObraForReport {
   return {
@@ -42,6 +42,17 @@ function makeMailer(): Mailer & {
     }
   };
 }
+
+function makeAuditLogger(): AuditLogger & { entries: AuditLogEntry[] } {
+  return {
+    entries: [],
+    async record(entry) {
+      this.entries.push(entry);
+    }
+  };
+}
+
+const actions = (logger: { entries: AuditLogEntry[] }) => logger.entries.map((e) => e.action);
 
 describe("runDailyReportJob", () => {
   it("skips the WhatsApp channel (logging) when auto-report is on but whatsappGroupId is empty", async () => {
@@ -319,6 +330,96 @@ describe("runDailyReportJob", () => {
 
     expect(messaging.files).toHaveLength(0);
     expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("audita geração + envio por canal (email e whatsapp)", async () => {
+    const messaging = makeMessaging();
+    const mailer = makeMailer();
+    const audit = makeAuditLogger();
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 3, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer,
+      auditLogger: audit
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    expect(actions(audit)).toEqual(["report.generated", "report.whatsapp.sent", "report.email.sent"]);
+    const email = audit.entries.find((e) => e.action === "report.email.sent");
+    expect(email?.status).toBe("OK");
+    expect(email?.actorType).toBe("SYSTEM");
+    expect(email?.metadata).toMatchObject({ recipients: ["a@b.com"], filename: "f.pdf" });
+  });
+
+  it("audita falha de envio com status ERROR e não bloqueia o outro canal", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const messaging = makeMessaging();
+    const audit = makeAuditLogger();
+    const mailer: Mailer = {
+      async sendMail() {
+        throw new Error("smtp down");
+      }
+    };
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: {
+        findObrasForAutoReport: async () => [
+          makeObra({ emailAutoReportEnabled: true, reportEmailRecipients: ["a@b.com"] })
+        ]
+      },
+      messaging,
+      mailer,
+      auditLogger: audit
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    // WhatsApp foi enviado (sent); e-mail falhou (failed com ERROR).
+    expect(messaging.files).toHaveLength(1);
+    expect(actions(audit)).toContain("report.whatsapp.sent");
+    const failed = audit.entries.find((e) => e.action === "report.email.failed");
+    expect(failed?.status).toBe("ERROR");
+    expect(failed?.metadata).toMatchObject({ error: "smtp down" });
+    errorSpy.mockRestore();
+  });
+
+  it("uma falha ao GRAVAR o log de auditoria não quebra o envio", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const messaging = makeMessaging();
+    // O contrato do AuditLogger é best-effort, mas o job não deve depender disso:
+    // mesmo um logger que lança não pode derrubar o envio.
+    const audit: AuditLogger = {
+      async record() {
+        throw new Error("db down");
+      }
+    };
+    const dailyReportService = {
+      generateForObraDay: vi.fn().mockResolvedValue({ buffer: Buffer.from("%PDF"), totalEntradas: 1, filename: "f.pdf" })
+    } as unknown as DailyReportService;
+    const deps: DailyReportJobDeps = {
+      dailyReportService,
+      store: { findObrasForAutoReport: async () => [makeObra()] },
+      messaging,
+      auditLogger: audit
+    };
+
+    await runDailyReportJob(deps, "2026-07-06");
+
+    // O WhatsApp foi enviado apesar do logger lançar.
+    expect(messaging.files).toHaveLength(1);
     errorSpy.mockRestore();
   });
 });

@@ -35,6 +35,8 @@ import {
   type ProjectListItem,
   type ProjectListResult,
   type ProjectRecord,
+  type AuditLogListInput,
+  type AuditLogListResult,
   type StandardInput,
   type StandardListInput,
   type StandardListResult,
@@ -270,6 +272,45 @@ export class PrismaPanelStore implements PanelStore {
       where: { id }
     });
     return result.count > 0;
+  }
+
+  async listAuditLogs(input: AuditLogListInput): Promise<AuditLogListResult> {
+    const where: Prisma.AuditLogWhereInput = {};
+    if (input.action) {
+      where.action = input.action;
+    }
+    if (input.search) {
+      where.OR = [
+        { actorLabel: { contains: input.search, mode: "insensitive" } },
+        { entityId: { contains: input.search, mode: "insensitive" } }
+      ];
+    }
+
+    const [rows, totalCount] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: input.page * input.size,
+        take: input.size
+      }),
+      this.prisma.auditLog.count({ where })
+    ]);
+
+    return {
+      data: rows.map((row) => ({
+        id: row.id.toString(),
+        actorType: row.actorType,
+        actorId: row.actorId,
+        actorLabel: row.actorLabel,
+        action: row.action,
+        status: row.status,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        metadata: row.metadata,
+        createdAt: row.createdAt
+      })),
+      totalCount
+    };
   }
 
   async listStandards(input: StandardListInput): Promise<StandardListResult> {

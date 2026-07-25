@@ -150,6 +150,35 @@ export interface StandardListResult {
   totalCount: number;
 }
 
+// ---- Audit logs ------------------------------------------------------------
+
+export interface AuditLogRecord {
+  id: string;
+  actorType: string;
+  actorId: string | null;
+  actorLabel: string | null;
+  action: string;
+  status: string;
+  entityType: string | null;
+  entityId: string | null;
+  metadata: unknown;
+  createdAt: Date;
+}
+
+export interface AuditLogListInput {
+  /** Filtra por ação exata (ex.: "report.email.sent"). */
+  action?: string;
+  /** Busca livre em actorLabel/entityId. */
+  search?: string;
+  page: number;
+  size: number;
+}
+
+export interface AuditLogListResult {
+  data: AuditLogRecord[];
+  totalCount: number;
+}
+
 // ---- Assets registry -------------------------------------------------------
 
 export interface AssetRecord {
@@ -309,6 +338,7 @@ export interface PanelStore {
   acknowledgeAlert(id: number): Promise<boolean>;
   confirmMention(id: number): Promise<boolean>;
   rejectMention(id: number): Promise<boolean>;
+  listAuditLogs(input: AuditLogListInput): Promise<AuditLogListResult>;
   listStandards(input: StandardListInput): Promise<StandardListResult>;
   findStandardById(id: number): Promise<StandardRecord | null>;
   createStandard(input: StandardInput): Promise<StandardRecord>;
@@ -449,6 +479,26 @@ export interface PanelMailer {
   sendMail(input: { to: string[]; subject: string; text: string; html?: string }): Promise<void>;
 }
 
+/** Porta mínima de auditoria (best-effort) usada pelo painel. */
+export interface PanelAuditLogger {
+  record(entry: {
+    actorType: "PANEL_USER";
+    actorId?: string | null;
+    actorLabel?: string | null;
+    action: string;
+    status?: "OK" | "ERROR";
+    entityType?: string | null;
+    entityId?: string | null;
+    metadata?: Record<string, unknown> | null;
+  }): Promise<void>;
+}
+
+/** Ator do painel (extraído do JWT) para registrar quem fez a ação. */
+export interface PanelActor {
+  id: number;
+  email: string;
+}
+
 /** Resultado do teste de e-mail (código i18n para o painel exibir). */
 export type TestEmailResult = { ok: true } | { ok: false; code: "email.notConfigured" | "email.noRecipients" };
 
@@ -460,8 +510,30 @@ export class PanelService {
       mediaStorage?: PanelMediaStorage;
       dailyReportService?: DailyReportGenerator;
       mailer?: PanelMailer | null;
+      auditLogger?: PanelAuditLogger | null;
     } = {}
   ) {}
+
+  /** Registra que um usuário do painel baixou/gerou um relatório (best-effort). */
+  async recordReportDownloaded(input: { actor: PanelActor; obraId: number; date: string; filename: string | null }): Promise<void> {
+    if (!this.options.auditLogger) {
+      return;
+    }
+    // Best-effort: auditar o download nunca pode derrubar a entrega do PDF.
+    try {
+      await this.options.auditLogger.record({
+        actorType: "PANEL_USER",
+        actorId: String(input.actor.id),
+        actorLabel: input.actor.email,
+        action: "report.downloaded.panel",
+        entityType: "PROJECT",
+        entityId: String(input.obraId),
+        metadata: { date: input.date, filename: input.filename }
+      });
+    } catch (error) {
+      console.error("[panel] Falha ao auditar download de relatório:", error);
+    }
+  }
 
   /**
    * Envia um e-mail de teste para os destinatários informados, para validar na
@@ -645,6 +717,10 @@ export class PanelService {
 
   rejectMention(id: number): Promise<boolean> {
     return this.store.rejectMention(id);
+  }
+
+  listAuditLogs(input: AuditLogListInput): Promise<AuditLogListResult> {
+    return this.store.listAuditLogs(input);
   }
 
   listStandards(input: StandardListInput): Promise<StandardListResult> {

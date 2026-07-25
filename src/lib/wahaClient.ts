@@ -52,6 +52,33 @@ export class WahaClient implements MessagingClient, MediaDownloader {
     }
   }
 
+  async sendImage(
+    chatId: string,
+    file: { mimetype: string; filename?: string; data: string },
+    caption?: string
+  ): Promise<void> {
+    // /api/sendImage entrega a foto inline (com preview), como uma imagem
+    // enviada pelo celular — diferente de /api/sendFile, que vira documento.
+    const response = await fetch(`${this.baseUrl}/api/sendImage`, {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        session: this.session,
+        chatId,
+        file: {
+          mimetype: file.mimetype,
+          filename: file.filename ?? "foto.jpg",
+          data: file.data
+        },
+        caption: caption ?? ""
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`WAHA sendImage failed with ${response.status}: ${await response.text()}`);
+    }
+  }
+
   async download(url: string): Promise<Buffer> {
     const downloadUrl = this.resolveMediaUrl(url);
     const response = await fetch(downloadUrl, {

@@ -1050,7 +1050,6 @@ export class DiarioDasObrasFlow implements FlowDefinition {
 
       const body = await this.deps.objectStorage.downloadPrivateObject(mediaPath);
       const mimetype = mimetypeFromPath(mediaPath);
-      const filename = mediaPath.split("/").pop() ?? "foto.jpg";
       const caption = grupoCaptionText({
         description: entrada.description,
         tipoServico: entrada.tipoServico,
@@ -1059,9 +1058,11 @@ export class DiarioDasObrasFlow implements FlowDefinition {
         obraNome
       });
 
-      await this.deps.messaging.sendFile(
+      // Envia como imagem inline (com preview), como uma foto do celular —
+      // não como anexo/documento. O nome do arquivo do storage não aparece.
+      await this.deps.messaging.sendImage(
         grupoId,
-        { mimetype, filename, data: body.toString("base64") },
+        { mimetype, filename: "foto.jpg", data: body.toString("base64") },
         caption
       );
     } catch (error) {

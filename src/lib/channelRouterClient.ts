@@ -37,6 +37,14 @@ export class ChannelRouterClient implements MessagingClient, MediaDownloader {
     return this.pick(chatId).sendFile(chatId, file, caption);
   }
 
+  async sendImage(
+    chatId: string,
+    file: { mimetype: string; filename?: string; data: string },
+    caption?: string
+  ): Promise<void> {
+    return this.pick(chatId).sendImage(chatId, file, caption);
+  }
+
   async download(ref: string): Promise<Buffer> {
     return this.pick(ref).download(ref);
   }

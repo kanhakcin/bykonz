@@ -205,9 +205,22 @@ export interface ConversationStore {
 
 export interface MessagingClient {
   sendText(chatId: string, text: string): Promise<void>;
+  /**
+   * Envia como DOCUMENTO/anexo (card com nome do arquivo). Use para PDFs
+   * (relatórios). Para fotos, prefira `sendImage` — vai inline, com preview.
+   */
   sendFile(
     chatId: string,
     file: { mimetype: string; filename: string; data: string },
+    caption?: string
+  ): Promise<void>;
+  /**
+   * Envia como IMAGEM inline (preview no chat, como uma foto do celular), não
+   * como anexo. `filename` é opcional e nem aparece para o destinatário.
+   */
+  sendImage(
+    chatId: string,
+    file: { mimetype: string; filename?: string; data: string },
     caption?: string
   ): Promise<void>;
 }

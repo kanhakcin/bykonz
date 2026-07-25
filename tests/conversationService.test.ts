@@ -227,6 +227,7 @@ class FakeStore implements ConversationStore {
 class FakeMessaging implements MessagingClient {
   messages: Array<{ chatId: string; text: string }> = [];
   files: Array<{ chatId: string; file: { mimetype: string; filename: string; data: string }; caption?: string }> = [];
+  images: Array<{ chatId: string; file: { mimetype: string; filename?: string; data: string }; caption?: string }> = [];
 
   async sendText(chatId: string, text: string): Promise<void> {
     this.messages.push({ chatId, text });
@@ -238,6 +239,14 @@ class FakeMessaging implements MessagingClient {
     caption?: string
   ): Promise<void> {
     this.files.push({ chatId, file, caption });
+  }
+
+  async sendImage(
+    chatId: string,
+    file: { mimetype: string; filename?: string; data: string },
+    caption?: string
+  ): Promise<void> {
+    this.images.push({ chatId, file, caption });
   }
 }
 
@@ -1027,9 +1036,10 @@ describe("ConversationService", () => {
     await deliverWaha(service, photoWebhook());
     await deliverWaha(service, textWebhook("Parede norte levantada"));
 
-    // A cópia foi enviada ao grupo (via sendFile) — não confundir com as mensagens de texto do privado.
-    expect(messaging.files).toHaveLength(1);
-    const enviado = messaging.files[0];
+    // A cópia foi enviada ao grupo como IMAGEM inline (sendImage), não como anexo.
+    expect(messaging.images).toHaveLength(1);
+    expect(messaging.files).toHaveLength(0);
+    const enviado = messaging.images[0];
     expect(enviado.chatId).toBe("123@g.us");
     expect(enviado.file.mimetype).toBe("image/jpeg");
     // O corpo veio do storage (download), reencaminhado em base64.
@@ -1054,6 +1064,7 @@ describe("ConversationService", () => {
     await deliverWaha(service, photoWebhook());
     await deliverWaha(service, textWebhook("Parede norte levantada"));
 
+    expect(messaging.images).toHaveLength(0);
     expect(messaging.files).toHaveLength(0);
     expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
   });
@@ -1113,6 +1124,7 @@ describe("ConversationService", () => {
 
     expect(store.entradas).toMatchObject([{ tipo: "Abrir nao conformidade" }]);
     // Só inspeção de serviço é copiada para o grupo.
+    expect(messaging.images).toHaveLength(0);
     expect(messaging.files).toHaveLength(0);
     expect(store.states.get(CHAT_ID)?.step).toBe("AWAITING_POST_SAVE_CHOICE");
   });
@@ -1139,8 +1151,8 @@ describe("ConversationService", () => {
     await deliverWaha(service, photoWebhook());
     await deliverWaha(service, textWebhook("Foto do canteiro"));
 
-    expect(messaging.files).toHaveLength(1);
-    expect(messaging.files[0].caption).toBe("Foto do canteiro\nOutros\nUsuario Teste - Obra Residencial Aurora");
+    expect(messaging.images).toHaveLength(1);
+    expect(messaging.images[0].caption).toBe("Foto do canteiro\nOutros\nUsuario Teste - Obra Residencial Aurora");
   });
 
   it("concludes even when the description does not contain a code, since the norm defines the procedure", async () => {

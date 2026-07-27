@@ -187,34 +187,60 @@ via `env_file`, e o `.env.example` documenta todas as variáveis necessárias.
 
 ### Passo de transição (fazer UMA vez, na VM)
 
-Antes do primeiro `git pull` que traz esses arquivos, é preciso remover as cópias
-não-rastreadas que já existem lá — senão o pull aborta com
-`error: Untracked working tree files would be overwritten by merge` e o deploy
-quebra.
+Antes do primeiro `git pull` que traz esses arquivos, é preciso lidar com as
+cópias que já existem lá. São **dois** erros diferentes, e o pull aborta em ambos:
+
+- **arquivos não-rastreados** (`Dockerfile`, `docker-compose.yml`,
+  `prisma/seedProd.ts`) → `error: The following untracked working tree files
+  would be overwritten by merge`
+- **arquivo rastreado e modificado** (`package-lock.json`, que o `npm install` de
+  cada deploy altera) → `error: Your local changes ... would be overwritten by merge`
 
 ```bash
 cd ~/bykonz-services
 
-# 1. backup das versões atuais (as que estão rodando hoje em produção)
+# 1. backup das versões que estão rodando hoje em produção
 mkdir -p ~/backup-prod-files
-cp Dockerfile docker-compose.yml ~/backup-prod-files/
+cp Dockerfile docker-compose.yml prisma/seedProd.ts ~/backup-prod-files/
 
-# 2. remover as cópias locais para o pull poder trazer as versionadas
-rm -f Dockerfile docker-compose.yml
+# 2. descartar o lock local (a versão do repo é a fonte da verdade — é o mesmo
+#    `git checkout --` do passo 1.1 do runbook, que o deploy.sh também faz)
+git checkout -- package-lock.json
 
-# 3. trazer as versionadas
+# 3. remover as cópias não-rastreadas para o pull poder trazer as versionadas
+rm -f Dockerfile docker-compose.yml prisma/seedProd.ts
+
+# 4. trazer as versionadas
 git pull origin master
 
-# 4. PROVAR que são equivalentes — as duas saídas devem ser VAZIAS
+# 5. PROVAR que são equivalentes — as três saídas devem ser VAZIAS
 diff ~/backup-prod-files/Dockerfile         Dockerfile
 diff ~/backup-prod-files/docker-compose.yml docker-compose.yml
+diff ~/backup-prod-files/seedProd.ts        prisma/seedProd.ts
 ```
 
-Se algum `diff` mostrar diferença, **pare**: restaure do backup
-(`cp ~/backup-prod-files/* .`) e investigue antes de deployar. Se as duas saídas
-vierem vazias, o build versionado é byte a byte o que já rodava.
+Se algum `diff` mostrar diferença, **pare**: restaure do backup e investigue antes
+de deployar. Se as três saídas vierem vazias, o build versionado é byte a byte o
+que já rodava.
 
 Guarde o `~/backup-prod-files` até o deploy seguinte passar.
+
+### Conferir o lock sob o npm do servidor
+
+Aproveite que você está na VM para fechar uma dúvida sobre a correção do
+`package-lock.json`: ela foi gerada com npm 10.9.7/Node 22, e o servidor roda npm
+10.8.2/Node 20. Se o lock estiver realmente em sincronia, `npm install` não deve
+mais alterá-lo:
+
+```bash
+npm install
+git status --short package-lock.json     # esperado: VAZIO
+rm -rf node_modules && npm ci            # esperado: exit 0
+```
+
+Se o `git status` mostrar `M package-lock.json`, o npm do servidor resolve algo
+diferente — nesse caso é **essa** versão do lock que deve ir para o repo
+(commitar a partir dela), porque é a do ambiente que builda a imagem.
 
 ### `.dockerignore` — por que ele existe
 

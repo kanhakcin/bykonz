@@ -1,0 +1,44 @@
+# Contexto do build da imagem do backend.
+#
+# Sem este arquivo, o `COPY . .` do Dockerfile arrastava o node_modules do host
+# (~400 MB) para dentro da imagem e SOBRESCREVIA o resultado do `RUN npm ci` que
+# a própria imagem tinha acabado de instalar — o `npm run build` passava a
+# compilar contra as dependências do host. Custava ~120 s por deploy (45% do
+# total) e quebraria de forma confusa a qualquer divergência de arquitetura ou
+# versão de Node entre host e container.
+#
+# O build (`prisma generate && tsc`) precisa apenas de: src/, prisma/,
+# package*.json e tsconfig.json.
+
+# Dependências e artefatos — a imagem instala/gera os seus
+node_modules
+dist
+
+# Segredos: nunca em camada de imagem. Verificado que `npm run build` roda sem
+# .env e sem DATABASE_URL; as variáveis chegam em runtime via env_file.
+.env
+.env.*
+
+# Painel: buildado à parte com pnpm e servido pelo Nginx — não entra na imagem
+# do backend (traz o próprio node_modules, que é o que mais pesava)
+frontend
+
+# Git, CI e editor
+.git
+.gitignore
+.github
+.vscode
+
+# Não usados pelo build (o tsconfig já exclui tests) nem pelo runtime
+tests
+coverage
+docs
+ops
+scripts
+.agents
+vitest.config.ts
+*.log
+*.md
+
+# Instalador do AWS CLI v2 descompactado no servidor
+aws

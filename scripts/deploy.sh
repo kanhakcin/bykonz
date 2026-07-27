@@ -4,7 +4,7 @@
 #
 # Automatiza o runbook do docs/deploy.md:
 #   git pull → npm install → migrations (Prisma) → build+up do backend (docker)
-#   → build do painel (pnpm) que o nginx serve de frontend/dist.
+#   → build do painel (pnpm) → publica o painel no WEB_ROOT que o Nginx serve.
 #
 # REGRA DE OURO (respeitada pela ordem dos passos): as migrations rodam ANTES de
 # subir o container novo. Se o app subir antes, quebra com "column ... does not exist".
@@ -19,8 +19,9 @@
 # O docker-compose.yml e o .env NÃO são versionados — vivem só no servidor.
 #
 # Rodando via CI/CD (GitHub Actions, sessão SSH não-interativa): nenhum passo usa
-# `sudo` — o nginx serve frontend/dist direto do repo, então não há publicação em
-# /var/www. Ver docs/deploy.md, seção CI/CD.
+# `sudo`. A publicação do painel escreve em $WEB_ROOT, que pertence ao usuário de
+# deploy (setup de uma vez). Em CI, `sudo` pediria senha e travaria o job.
+# Ver docs/deploy.md, seções "Publicação do painel" e CI/CD.
 
 set -Eeuo pipefail
 
@@ -28,6 +29,12 @@ set -Eeuo pipefail
 BRANCH="${BRANCH:-master}"
 COMPOSE_FILE="docker-compose.yml"   # não versionado; existe só no servidor
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/health}"
+
+# Onde o painel buildado é publicado (o `root` do server block do Nginx).
+# Fica FORA do repositório de propósito: o que o Nginx expõe é um artefato
+# publicado, não a árvore de trabalho do git (que tem .env, .git, src/...).
+# Precisa ser gravável pelo usuário de deploy — ver docs/deploy.md.
+WEB_ROOT="${WEB_ROOT:-/var/www/bykonz-services-painel}"
 
 DO_PULL=1
 DO_FRONTEND=1
@@ -175,16 +182,37 @@ fi
 # --- 5. Painel (frontend estático servido pelo nginx) ------------------------
 if [ "$DO_FRONTEND" -eq 1 ]; then
   step "Build do painel (pnpm)"
-  # O nginx serve frontend/dist NO LUGAR — não há cópia p/ /var/www, então nada
-  # de sudo aqui. O `vite build` limpa o dist antes de gerar: há uma janela de
-  # poucos segundos em que o painel pode devolver 404. Recarregar a página resolve.
   pushd frontend >/dev/null
   $PNPM install --frozen-lockfile || $PNPM install
   $PNPM run build            # vite build + tsc --noEmit (falha em erro de tipo)
   popd >/dev/null
 
   [ -d frontend/dist ] || die "frontend/dist não foi gerado — build do painel falhou?"
-  ok "Painel buildado em frontend/dist (nginx já serve a versão nova)."
+
+  step "Publicando o painel em $WEB_ROOT"
+  # O `vite build` limpa o frontend/dist antes de gerar. Por isso publicamos em
+  # outro lugar: o Nginx serve $WEB_ROOT, que só é tocado aqui — com conteúdo já
+  # pronto —, sem a janela de 404 que existia ao servir o dist direto.
+  #
+  # SEM sudo por design: $WEB_ROOT deve pertencer ao usuário de deploy (setup de
+  # uma vez, ver docs/deploy.md). Em CI, `sudo` pediria senha e travaria o job.
+  if [ ! -d "$WEB_ROOT" ]; then
+    die "$WEB_ROOT não existe. Setup de uma vez (ver docs/deploy.md):
+     sudo mkdir -p $WEB_ROOT && sudo chown -R \$USER:\$USER $WEB_ROOT"
+  fi
+  [ -w "$WEB_ROOT" ] || die "$WEB_ROOT não é gravável por $(whoami). Rode:
+     sudo chown -R \$USER:\$USER $WEB_ROOT"
+
+  if command -v rsync >/dev/null 2>&1; then
+    # --delete remove o que sobrou da versão anterior (hashes de chunk mudam)
+    rsync -a --delete frontend/dist/ "$WEB_ROOT/"
+  else
+    warn "rsync ausente — usando cp. Limpando $WEB_ROOT antes para não deixar órfãos."
+    find "$WEB_ROOT" -mindepth 1 -delete
+    cp -a frontend/dist/. "$WEB_ROOT/"
+  fi
+  [ -f "$WEB_ROOT/index.html" ] || die "publicação falhou: não achei $WEB_ROOT/index.html."
+  ok "Painel publicado em $WEB_ROOT."
 else
   warn "Pulando build do painel (--no-frontend)."
 fi

@@ -1,9 +1,9 @@
 # Deploy em produção
 
 Ambiente: VM em `~/bykonz-services`, com **Docker Compose** (backend + WAHA) e
-**nginx** servindo o painel (frontend). O backend usa **npm**; o frontend usa
-**pnpm**. O Dockerfile builda **apenas o backend** — o frontend é publicado à
-parte (build local + nginx).
+**nginx** servindo o painel a partir de `/var/www/bykonz-services-painel`. O
+backend usa **npm**; o frontend usa **pnpm**. O Dockerfile builda **apenas o
+backend** — o painel é buildado à parte e publicado no web root.
 
 > Regra de ouro: **rode a migration ANTES de subir o container novo.** Se o app
 > subir antes de aplicar migrations pendentes, quebra com `column ... does not exist`.
@@ -48,21 +48,67 @@ frontend.
 
 ## 2. Frontend (painel do gestor)
 
-O painel **não** está no Dockerfile. É buildado com **pnpm** e servido pelo
-**nginx** a partir de `frontend/dist`.
+O painel **não** está no Dockerfile. É buildado com **pnpm** e **publicado** em
+`/var/www/bykonz-services-painel`, que é o `root` do server block do Nginx.
 
 ```bash
 cd ~/bykonz-services/frontend
 
-# Se o pnpm não estiver instalado (vem via corepack no Node 20):
+# Se o pnpm não estiver instalado (vem via corepack):
 #   corepack enable && corepack prepare pnpm@10.28.2 --activate
 
 pnpm install --frozen-lockfile     # equivalente ao `npm ci` (usa pnpm-lock.yaml)
 pnpm run build                     # gera frontend/dist com a UI nova
+
+# publica: substitui o conteúdo e remove sobras da versão anterior
+rsync -a --delete dist/ /var/www/bykonz-services-painel/
 ```
 
-O nginx aponta para essa pasta `dist`, então a nova versão do painel já reflete
-no ar após o build (recarregue a página; se necessário, `sudo nginx -s reload`).
+O `rsync --delete` é necessário porque os nomes dos chunks carregam hash
+(`index-CtXE3jqg.js`): sem ele, os arquivos da versão anterior ficariam órfãos
+acumulando no web root.
+
+### Por que publicar fora do repositório
+
+O Nginx já serviu `frontend/dist` direto do repositório. Mudou por três motivos:
+
+1. **Artefato ≠ código-fonte.** O `root` do Nginx era um diretório que também
+   contém `.git`, `.env`, `src/` e `node_modules`. Funcionava porque a config
+   estava correta — mas um `location`/`try_files` mal escrito serviria o `.env`.
+   Arquitetura boa é a em que o erro é impossível, não a que depende de acertar.
+2. **Sem janela de indisponibilidade.** O `vite build` limpa o `dist` antes de
+   gerar; servindo dali, o painel devolvia 404 por alguns segundos a cada deploy.
+   Publicando em outro lugar, o `$WEB_ROOT` só recebe conteúdo já pronto.
+3. **Não expor a home.** Servir de `/home/app1cano/...` exige que a home seja
+   atravessável pelo `www-data` (`o+x`).
+
+O diretório pertence ao **usuário de deploy** (não ao root), então a publicação
+não usa `sudo` — essencial para o CI, onde `sudo` pediria senha e travaria o job.
+
+### Setup de uma vez (e migração do modelo antigo)
+
+Faça **nesta ordem** — assim a troca é instantânea e sem downtime, porque o Nginx
+só passa a apontar para o diretório novo depois de ele já estar populado:
+
+```bash
+# 1. criar o web root e dar posse ao usuário de deploy
+sudo mkdir -p /var/www/bykonz-services-painel
+sudo chown -R $USER:$USER /var/www/bykonz-services-painel
+
+# 2. popular via deploy normal (o Nginx ainda serve o local antigo — sem impacto)
+cd ~/bykonz-services && ./scripts/deploy.sh --no-pull --skip-migrations
+
+# 3. conferir que o conteúdo está lá
+ls /var/www/bykonz-services-painel/    # index.html + assets/
+
+# 4. só agora apontar o Nginx: root /var/www/bykonz-services-painel;
+sudo nano /etc/nginx/sites-available/<seu-server-block>
+sudo nginx -t && sudo nginx -s reload
+```
+
+Rollback: reverter o `root` para `/home/app1cano/bykonz-services/frontend/dist` e
+recarregar o Nginx. O `frontend/dist` continua existindo (é o intermediário do
+build), então a volta é imediata.
 
 ---
 
@@ -165,11 +211,12 @@ Detalhes que o script já trata:
   o npm do servidor.
 - **Aborta se o backend não ficar saudável** — espera `/health` responder (~60s);
   se não responder, mostra os logs do container e **não** builda o painel.
-- **Sem `sudo`** — o nginx serve `frontend/dist` no lugar, não há cópia p/ `/var/www`.
+- **Publica o painel em `$WEB_ROOT`** (`/var/www/bykonz-services-painel`) com
+  `rsync --delete`, e falha com instrução clara se o diretório não existir ou não
+  for gravável. Sobrescreva com `WEB_ROOT=... ./scripts/deploy.sh` se precisar.
+- **Sem `sudo`** — o `$WEB_ROOT` pertence ao usuário de deploy. Em CI, `sudo`
+  pediria senha e travaria o job.
 - **`pnpm` via `corepack`** quando o binário não está no PATH.
-
-> O `vite build` limpa o `frontend/dist` antes de gerar, então há uma janela de
-> poucos segundos em que o painel pode devolver 404. Recarregar a página resolve.
 
 O `.env` **não é versionado** — vive só no servidor, e é justamente ele que o
 script usa como marcador de "estou no servidor de verdade". Se você rodar o
@@ -329,8 +376,11 @@ migrations**. Um `concurrency` global impede dois deploys simultâneos.
    Settings → Environments → `production` dá pra exigir que alguém aprove antes
    de cada deploy (segundo par de olhos).
 
-Diferente do CareDesk, aqui **não precisa de sudoers/NOPASSWD**: nenhum passo do
-script usa `sudo`.
+Diferente do CareDesk, aqui **não precisa de sudoers/NOPASSWD** — mesmo publicando
+em `/var/www`. O motivo é que o `$WEB_ROOT` pertence ao usuário de deploy (o
+`chown` do setup), então o `rsync` escreve sem privilégio. No CareDesk o
+`/var/www/caredesk-admin` é do root, daí o `sudo` e a necessidade do sudoers; lá
+um `chown` equivalente permitiria remover o `/etc/sudoers.d/caredesk-deploy`.
 
 ### Troubleshooting do CI
 

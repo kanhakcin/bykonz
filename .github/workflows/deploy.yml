@@ -1,0 +1,70 @@
+name: Deploy (produção)
+
+# Dispara SÓ manualmente: aba Actions → "Deploy (produção)" → Run workflow.
+# (ou via CLI: gh workflow run "Deploy (produção)")
+#
+# O runner do GitHub conecta por SSH na VM e roda scripts/deploy.sh lá.
+# Nada é buildado no runner — o build (docker + painel) acontece no server,
+# igual ao deploy manual. O runner é só o "dedo que aperta o botão".
+#
+# Pré-requisitos (configurar UMA vez — ver docs/deploy.md, seção CI/CD):
+#   Secrets do repo (Settings → Secrets and variables → Actions):
+#     SSH_HOST        host ou IPv4 da VM
+#     SSH_USER        usuário de deploy na VM
+#     SSH_PORT        22 (opcional; default 22)
+#     SSH_PRIVATE_KEY chave privada da deploy key (a pública vai no authorized_keys da VM)
+#   Nada de sudoers aqui: o nginx serve frontend/dist direto do repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "O que publicar"
+        type: choice
+        default: "completo (backend + painel)"
+        options:
+          - "completo (backend + painel)"
+          - "só backend (--no-frontend)"
+      skip_migrations:
+        description: "Pular migrations (aplicar à mão depois)"
+        type: boolean
+        default: false
+
+# Nunca deixar dois deploys correndo ao mesmo tempo.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production   # opcional: permite exigir aprovação manual no GitHub
+
+    steps:
+      - name: Montar flags do deploy
+        id: flags
+        run: |
+          FLAGS=""
+          if [ "${{ inputs.target }}" = "só backend (--no-frontend)" ]; then
+            FLAGS="$FLAGS --no-frontend"
+          fi
+          if [ "${{ inputs.skip_migrations }}" = "true" ]; then
+            FLAGS="$FLAGS --skip-migrations"
+          fi
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+          echo "Rodando: ./scripts/deploy.sh$FLAGS"
+
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT || 22 }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy via SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+              -p "${{ secrets.SSH_PORT || 22 }}" \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "cd ~/bykonz-services && ./scripts/deploy.sh${{ steps.flags.outputs.flags }}"

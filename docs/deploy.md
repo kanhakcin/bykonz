@@ -171,9 +171,92 @@ Detalhes que o script já trata:
 > O `vite build` limpa o `frontend/dist` antes de gerar, então há uma janela de
 > poucos segundos em que o painel pode devolver 404. Recarregar a página resolve.
 
-O `docker-compose.yml` e o `.env` **não são versionados** — vivem só no servidor.
-O script confere que estão lá e falha cedo com mensagem clara se você rodar do
-lugar errado.
+O `.env` **não é versionado** — vive só no servidor, e é justamente ele que o
+script usa como marcador de "estou no servidor de verdade". Se você rodar o
+script de um clone sem `.env` (e sem `DATABASE_URL` no ambiente), ele falha cedo
+com mensagem clara, antes de tocar em qualquer coisa.
+
+---
+
+## Arquivos de build (versionados a partir de julho/2026)
+
+`Dockerfile`, `docker-compose.yml`, `.dockerignore` e `prisma/seedProd.ts` viviam
+**apenas** no disco da VM — se ela se perdesse, o *como* buildar e subir se perdia
+com ela. Agora estão no repo. O `.env` continua fora: o compose lê os valores dele
+via `env_file`, e o `.env.example` documenta todas as variáveis necessárias.
+
+### Passo de transição (fazer UMA vez, na VM)
+
+Antes do primeiro `git pull` que traz esses arquivos, é preciso remover as cópias
+não-rastreadas que já existem lá — senão o pull aborta com
+`error: Untracked working tree files would be overwritten by merge` e o deploy
+quebra.
+
+```bash
+cd ~/bykonz-services
+
+# 1. backup das versões atuais (as que estão rodando hoje em produção)
+mkdir -p ~/backup-prod-files
+cp Dockerfile docker-compose.yml ~/backup-prod-files/
+
+# 2. remover as cópias locais para o pull poder trazer as versionadas
+rm -f Dockerfile docker-compose.yml
+
+# 3. trazer as versionadas
+git pull origin master
+
+# 4. PROVAR que são equivalentes — as duas saídas devem ser VAZIAS
+diff ~/backup-prod-files/Dockerfile         Dockerfile
+diff ~/backup-prod-files/docker-compose.yml docker-compose.yml
+```
+
+Se algum `diff` mostrar diferença, **pare**: restaure do backup
+(`cp ~/backup-prod-files/* .`) e investigue antes de deployar. Se as duas saídas
+vierem vazias, o build versionado é byte a byte o que já rodava.
+
+Guarde o `~/backup-prod-files` até o deploy seguinte passar.
+
+### `.dockerignore` — por que ele existe
+
+Sem ele, o `COPY . .` do Dockerfile arrastava o `node_modules` do host (~400 MB)
+para dentro da imagem e **sobrescrevia o resultado do `RUN npm ci` da própria
+imagem** — o build passava a compilar contra as dependências do host. Custava
+~120 s por deploy (45% do total) e era frágil: qualquer divergência de
+arquitetura ou versão de Node entre host e container quebraria de forma confusa.
+
+O build precisa apenas de `src/`, `prisma/`, `package*.json` e `tsconfig.json`.
+Verificado que `npm run build` (`prisma generate && tsc`) roda **sem `.env` e sem
+`DATABASE_URL`**, então nenhum segredo precisa entrar em camada de imagem — as
+variáveis chegam em runtime via `env_file`.
+
+### `npm ci` e o `package-lock.json`
+
+O `Dockerfile` usa `npm ci` nos dois estágios — ele exige um lock **em sincronia**
+com o `package.json`. Em julho/2026 o lock estava dessincronizado (faltavam dois
+pacotes `@emnapi/*`) e o `npm ci` abortava; o deploy só passava porque as camadas
+estavam `CACHED`. Corrigido.
+
+Se o `npm ci` voltar a falhar com `Missing: ... from lock file`, a correção é:
+
+```bash
+npm install                 # regenera o lock em sincronia
+rm -rf node_modules && npm ci   # provar que passa do zero
+git add package-lock.json && git commit
+```
+
+Não "resolva" trocando o `npm ci` do Dockerfile por `npm install`: o `ci` é o que
+garante que a imagem instala exatamente as versões do lock. O passo 1.2 do runbook
+manual usa `npm install` **no host** por outro motivo (tolerância à divergência do
+npm do servidor), e o script de deploy mantém isso.
+
+### Seed de produção
+
+```bash
+npm run seed:prod        # setores, hierarquias de ativo, prefixos, empresa base
+```
+
+Idempotente (tudo `upsert` por chave natural): rodar de novo não duplica nem
+apaga nada. Não cria dados de demonstração — para isso existe o `npm run db:seed`.
 
 ---
 

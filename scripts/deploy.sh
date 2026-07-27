@@ -68,7 +68,13 @@ need() { command -v "$1" >/dev/null 2>&1 || die "'$1' não encontrado no PATH.";
 # --- Sanidade ----------------------------------------------------------------
 step "Checando pré-requisitos"
 [ -f "package.json" ] || die "rode de dentro de ~/bykonz-services (não achei package.json)."
-[ -f "$COMPOSE_FILE" ] || die "não achei $COMPOSE_FILE. Ele não é versionado — rode no servidor, em ~/bykonz-services."
+[ -f "$COMPOSE_FILE" ] || die "não achei $COMPOSE_FILE — rode da raiz do repositório."
+# O .env é o único arquivo do deploy que NÃO é versionado: é ele que marca
+# "estamos no servidor de verdade". Sem ele o compose (env_file) e as migrations
+# (DATABASE_URL) falhariam mais adiante — melhor parar aqui, com mensagem clara.
+if [ ! -f .env ] && [ -z "${DATABASE_URL:-}" ]; then
+  die "não achei .env (não versionado) nem DATABASE_URL no ambiente. Rode no servidor, em ~/bykonz-services."
+fi
 
 need git; need docker; need npm
 docker compose version >/dev/null 2>&1 || die "'docker compose' (plugin) não disponível."

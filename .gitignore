@@ -11,3 +11,11 @@ coverage/
 
 # Config de backup com segredos (mantém só o .example versionado)
 ops/backup/backup.env
+
+# Instalador do AWS CLI v2 descompactado no servidor — ferramenta, não código
+aws/
+
+# Chaves SSH. As deploy keys do CI vivem FORA de qualquer repo (ex.: ~/.ssh);
+# esta linha é só rede de segurança contra um `git add -A` distraído.
+deploy_key*
+*.pem

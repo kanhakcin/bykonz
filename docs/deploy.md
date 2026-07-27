@@ -229,6 +229,26 @@ Verificado que `npm run build` (`prisma generate && tsc`) roda **sem `.env` e se
 `DATABASE_URL`**, então nenhum segredo precisa entrar em camada de imagem — as
 variáveis chegam em runtime via `env_file`.
 
+### `npm ci` e o `package-lock.json`
+
+O `Dockerfile` usa `npm ci` nos dois estágios — ele exige um lock **em sincronia**
+com o `package.json`. Em julho/2026 o lock estava dessincronizado (faltavam dois
+pacotes `@emnapi/*`) e o `npm ci` abortava; o deploy só passava porque as camadas
+estavam `CACHED`. Corrigido.
+
+Se o `npm ci` voltar a falhar com `Missing: ... from lock file`, a correção é:
+
+```bash
+npm install                 # regenera o lock em sincronia
+rm -rf node_modules && npm ci   # provar que passa do zero
+git add package-lock.json && git commit
+```
+
+Não "resolva" trocando o `npm ci` do Dockerfile por `npm install`: o `ci` é o que
+garante que a imagem instala exatamente as versões do lock. O passo 1.2 do runbook
+manual usa `npm install` **no host** por outro motivo (tolerância à divergência do
+npm do servidor), e o script de deploy mantém isso.
+
 ### Seed de produção
 
 ```bash

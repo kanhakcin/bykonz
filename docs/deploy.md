@@ -8,6 +8,12 @@ parte (build local + nginx).
 > Regra de ouro: **rode a migration ANTES de subir o container novo.** Se o app
 > subir antes de aplicar migrations pendentes, quebra com `column ... does not exist`.
 
+> **Atalho:** `./scripts/deploy.sh` (no server, de dentro de `~/bykonz-services`)
+> automatiza todos os passos deste runbook na ordem certa. Dá pra disparar sem
+> abrir SSH pelo GitHub Actions — ver a seção *"Disparar o deploy pelo GitHub
+> (CI/CD)"* no fim do arquivo. As seções abaixo documentam o que o script faz (e servem de
+> referência quando algo precisa ser feito à mão).
+
 ---
 
 ## 1. Backend (API + cron do relatório diário)
@@ -119,6 +125,10 @@ npm run daily-report:run -- 2026-07-10        # AAAA-MM-DD; sem data = hoje
 ## Resumo rápido
 
 ```bash
+# tudo de uma vez (equivale aos blocos abaixo, na ordem certa)
+cd ~/bykonz-services && ./scripts/deploy.sh
+
+# ...ou à mão:
 # backend
 git checkout -- package-lock.json && git pull origin master
 npm install
@@ -128,3 +138,99 @@ docker compose build && docker compose up -d
 # frontend
 cd frontend && pnpm install --frozen-lockfile && pnpm run build
 ```
+
+---
+
+## `scripts/deploy.sh`
+
+Roda **no servidor**, de dentro de `~/bykonz-services`. Faz, em ordem:
+`git pull` → `npm install` → `prisma migrate deploy` → `docker compose build && up -d`
+→ espera o `/health` → `pnpm run build` do painel.
+
+```bash
+./scripts/deploy.sh                     # completo (backend + migrations + painel)
+./scripts/deploy.sh --no-frontend       # só o backend (pula o build do painel)
+./scripts/deploy.sh --no-pull           # deploy do código já presente (sem git pull)
+./scripts/deploy.sh --skip-migrations   # não aplica migrations (aplicar à mão depois)
+./scripts/deploy.sh --help
+```
+
+Detalhes que o script já trata:
+
+- **Migrations antes do container** — a regra de ouro do topo deste arquivo.
+- **Lockfiles divergentes** — descarta alterações locais em `package-lock.json` e
+  `frontend/pnpm-lock.yaml` antes do pull (a versão do repo é a fonte da verdade).
+  Outras alterações locais só geram aviso; o script não descarta trabalho seu.
+- **`npm install`, não `npm ci`** — o `ci` aborta quando o lock dessincroniza com
+  o npm do servidor.
+- **Aborta se o backend não ficar saudável** — espera `/health` responder (~60s);
+  se não responder, mostra os logs do container e **não** builda o painel.
+- **Sem `sudo`** — o nginx serve `frontend/dist` no lugar, não há cópia p/ `/var/www`.
+- **`pnpm` via `corepack`** quando o binário não está no PATH.
+
+> O `vite build` limpa o `frontend/dist` antes de gerar, então há uma janela de
+> poucos segundos em que o painel pode devolver 404. Recarregar a página resolve.
+
+O `docker-compose.yml` e o `.env` **não são versionados** — vivem só no servidor.
+O script confere que estão lá e falha cedo com mensagem clara se você rodar do
+lugar errado.
+
+---
+
+## Disparar o deploy pelo GitHub (CI/CD) ☁️
+
+`.github/workflows/deploy.yml` deixa você deployar **sem abrir SSH**: aba
+**Actions → "Deploy (produção)" → Run workflow** (ou `gh workflow run "Deploy (produção)"`).
+O runner do GitHub conecta por SSH na VM e roda o `scripts/deploy.sh` lá — o build
+acontece no server, igual ao manual. É `workflow_dispatch` (só manual, **não**
+dispara em push).
+
+Inputs do formulário: **O que publicar** (completo / só backend) e **Pular
+migrations**. Um `concurrency` global impede dois deploys simultâneos.
+
+**Configurar uma vez:**
+
+1. **Bootstrap no server** — o script precisa existir lá. Uma vez, na VM:
+   ```bash
+   cd ~/bykonz-services && git pull origin master && chmod +x scripts/deploy.sh
+   ```
+
+2. **Deploy key** — gerar um par SÓ para o CI (na sua máquina):
+   ```bash
+   ssh-keygen -t ed25519 -f deploy_key -N "" -C "github-actions-deploy"
+   ```
+   Copiar a **pública** para o server (autoriza o runner a entrar):
+   ```bash
+   ssh-copy-id -i deploy_key.pub USUARIO@HOST   # ou colar em ~/.ssh/authorized_keys
+   ```
+   Essa chave é só p/ o SSH na VM — o `git pull` do server usa as credenciais
+   que ele já tem.
+
+3. **Secrets do repo** — GitHub → Settings → Secrets and variables → Actions:
+   | Secret | Valor |
+   |---|---|
+   | `SSH_HOST` | host ou IPv4 da VM |
+   | `SSH_USER` | usuário de deploy na VM |
+   | `SSH_PORT` | `22` (opcional) |
+   | `SSH_PRIVATE_KEY` | conteúdo do arquivo `deploy_key` (a **privada**) |
+
+   Apague o `deploy_key` local depois de colar. **Nunca** commitar as chaves.
+
+4. **(Opcional) Aprovação manual** — o job usa `environment: production`. Em
+   Settings → Environments → `production` dá pra exigir que alguém aprove antes
+   de cada deploy (segundo par de olhos).
+
+Diferente do CareDesk, aqui **não precisa de sudoers/NOPASSWD**: nenhum passo do
+script usa `sudo`.
+
+### Troubleshooting do CI
+
+- **Job trava/expira** (timeout de 20 min) → algum comando pediu input na VM.
+  Confira se o `sudo` não voltou ao script e se o `corepack` não está pedindo
+  confirmação p/ baixar o pnpm.
+- **`Host key verification failed`** → o `ssh-keyscan` não resolveu o `SSH_HOST`;
+  use o IPv4.
+- **`Permission denied (publickey)`** → a pública não está no `authorized_keys`
+  do `SSH_USER`, ou o secret `SSH_PRIVATE_KEY` foi colado sem a linha final.
+- **Falhou no `/health`** → o job traz os logs do container no output; o deploy
+  para antes do painel, então backend velho e painel velho seguem no ar.

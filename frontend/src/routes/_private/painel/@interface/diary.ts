@@ -38,6 +38,10 @@ export interface Entry {
   status: EntryStatus;
   mediaUrl: string | null;
   mediaCount: number;
+  /** ISO 8601 da última correção de texto feita no painel; null se o texto é o original do bot. */
+  editedAt: string | null;
+  /** Nome do gestor que corrigiu o texto. */
+  editedBy: string | null;
 }
 
 export interface Alert {

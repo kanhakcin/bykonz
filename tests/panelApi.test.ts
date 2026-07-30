@@ -38,6 +38,7 @@ import {
   type PanelUserListItem,
   type PanelUserListResult,
   type PanelUserRecord,
+  type PanelAuditLogger,
   type PanelMailer,
   type PanelUserRole,
   type PersonRef,
@@ -220,6 +221,8 @@ class FakePanelStore implements PanelStore {
         authorName: "Eng. Marina Alves",
         media: { id: 101n, mediaType: "image/jpeg" },
         mediaCount: 1,
+        editedAt: null,
+        editedByName: null,
         mentions: [
           {
             id: 11,
@@ -239,6 +242,8 @@ class FakePanelStore implements PanelStore {
         authorName: "Eng. Marina Alves",
         media: null,
         mediaCount: 1,
+        editedAt: null,
+        editedByName: null,
         mentions: [
           {
             id: 22,
@@ -258,6 +263,8 @@ class FakePanelStore implements PanelStore {
         authorName: "Téc. Paulo Reis",
         media: { id: 104n, mediaType: null },
         mediaCount: 1,
+        editedAt: null,
+        editedByName: null,
         mentions: [
           {
             id: 41,
@@ -305,6 +312,28 @@ class FakePanelStore implements PanelStore {
 
   async findEntriesForDay(input: { start: Date; end: Date }): Promise<EntryRecord[]> {
     return this.entries.filter((e) => e.createdAt >= input.start && e.createdAt < input.end);
+  }
+
+  /** Cópia: o service lê o registro antes de atualizar, então não pode ver a mutação. */
+  async findEntryById(id: bigint): Promise<EntryRecord | null> {
+    const entry = this.entries.find((e) => e.id === id);
+    return entry ? { ...entry, mentions: entry.mentions.map((m) => ({ ...m })) } : null;
+  }
+
+  async updateEntryDescription(input: {
+    entryId: bigint;
+    description: string;
+    editedByPanelUserId: number;
+  }): Promise<EntryRecord | null> {
+    const entry = this.entries.find((e) => e.id === input.entryId);
+    if (!entry) {
+      return null;
+    }
+
+    entry.description = input.description;
+    entry.editedAt = dateAt("12:00");
+    entry.editedByName = this.panelUsers.find((u) => u.id === input.editedByPanelUserId)?.name ?? null;
+    return this.findEntryById(input.entryId);
   }
 
   async findAlertsForEntries(entryIds: bigint[]): Promise<AlertRecord[]> {
@@ -828,11 +857,14 @@ class FakeDailyReportGenerator implements DailyReportGenerator {
 
 /** Mailer de teste do painel: captura os envios ou força falha, conforme o caso. */
 let mailerSent: Array<{ to: string[]; subject: string; text: string; html?: string }> = [];
+/** Trilha de auditoria capturada em memória (mesmo contrato do PrismaAuditLogger). */
+let auditRecords: Array<Parameters<PanelAuditLogger["record"]>[0]> = [];
 function buildApp(options: { mailer?: PanelMailer | null } = {}) {
   store = new FakePanelStore();
   storage.downloads = [];
   storage.uploads = [];
   mailerSent = [];
+  auditRecords = [];
   const defaultMailer: PanelMailer = {
     async sendMail(input) {
       mailerSent.push(input);
@@ -842,7 +874,12 @@ function buildApp(options: { mailer?: PanelMailer | null } = {}) {
     timezoneOffset: "-03:00",
     mediaStorage: storage,
     dailyReportService: new FakeDailyReportGenerator(),
-    mailer: options.mailer === undefined ? defaultMailer : options.mailer
+    mailer: options.mailer === undefined ? defaultMailer : options.mailer,
+    auditLogger: {
+      async record(entry) {
+        auditRecords.push(entry);
+      }
+    }
   });
   const panelRouter = createPanelRouter(service, {
     jwtSecret: JWT_SECRET,
@@ -1001,6 +1038,114 @@ describe("GET /api/v1/diary", () => {
     const app = buildApp();
     const res = await request(app).get("/api/v1/diary?date=2026-07-03&projectId=99").set(auth);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/v1/entries/:id", () => {
+  it("corrige a descrição e devolve o registro marcado como editado", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .patch("/api/v1/entries/1")
+      .set(auth)
+      .send({ description: "Grauteamento da canaleta superior. (PS-024)" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: 1,
+      description: "Grauteamento da canaleta superior. (PS-024)",
+      editedBy: "Ricardo Tanen"
+    });
+    expect(typeof res.body.editedAt).toBe("string");
+    // Foto, autor e horário do registro permanecem intocados.
+    expect(res.body.mediaUrl).toBe("/media/101");
+    expect(res.body.author.name).toBe("Eng. Marina Alves");
+    expect(res.body.recordedAt).toBe(dateAt("09:14").toISOString());
+  });
+
+  it("registra o texto anterior e o novo na trilha de auditoria", async () => {
+    const app = buildApp();
+    await request(app).patch("/api/v1/entries/1").set(auth).send({ description: "Texto corrigido." });
+
+    const log = auditRecords.find((entry) => entry.action === "entry.description.updated");
+    expect(log).toMatchObject({
+      actorType: "PANEL_USER",
+      actorId: "1",
+      actorLabel: "gestor@tanen.com.br",
+      entityType: "ENTRY",
+      entityId: "1"
+    });
+    expect(log?.metadata).toMatchObject({
+      before: "Grauteamento da canaleta inferior.",
+      after: "Texto corrigido.",
+      recordedAt: dateAt("09:14").toISOString()
+    });
+  });
+
+  it("mantém o registro no dia original — a correção não muda createdAt", async () => {
+    const app = buildApp();
+    await request(app).patch("/api/v1/entries/1").set(auth).send({ description: "Texto corrigido." });
+
+    const day = await request(app).get("/api/v1/diary?date=2026-07-03").set(auth);
+    const entry = day.body.entries.find((e: { id: number }) => e.id === 1);
+    expect(entry.description).toBe("Texto corrigido.");
+    expect(entry.recordedAt).toBe(dateAt("09:14").toISOString());
+  });
+
+  it("recusa descrição vazia, ausente ou acima do limite", async () => {
+    const app = buildApp();
+
+    for (const body of [{ description: "   " }, {}, { description: 42 }, { description: "x".repeat(2001) }]) {
+      const res = await request(app).patch("/api/v1/entries/1").set(auth).send(body);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_description");
+    }
+
+    // Nada foi alterado nem auditado nas tentativas inválidas.
+    expect(store.entries.find((e) => e.id === 1n)?.description).toBe("Grauteamento da canaleta inferior.");
+    expect(auditRecords).toHaveLength(0);
+  });
+
+  it("returns 400 for a non-numeric id", async () => {
+    const app = buildApp();
+    const res = await request(app).patch("/api/v1/entries/abc").set(auth).send({ description: "Texto." });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_id");
+  });
+
+  it("returns 404 when the entry does not exist", async () => {
+    const app = buildApp();
+    const res = await request(app).patch("/api/v1/entries/999").set(auth).send({ description: "Texto." });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("entry_not_found");
+  });
+
+  it("requires authentication", async () => {
+    const app = buildApp();
+    const res = await request(app).patch("/api/v1/entries/1").send({ description: "Texto." });
+    expect(res.status).toBe(401);
+  });
+
+  it("aceita MANAGER — corrigir registro é ação de gestão, não só de admin", async () => {
+    const app = buildApp();
+    const managerToken = tokenFor({ id: 2, email: "gestor2@tanen.com.br", name: "Gestora", role: "MANAGER" });
+    const res = await request(app)
+      .patch("/api/v1/entries/1")
+      .set("Authorization", `Bearer ${managerToken}`)
+      .send({ description: "Texto corrigido pelo gestor." });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("libera PATCH no preflight de CORS", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .options("/api/v1/entries/1")
+      .set("Origin", ORIGIN)
+      .set("Access-Control-Request-Method", "PATCH")
+      .set("Access-Control-Request-Headers", "Authorization,Content-Type");
+
+    expect(res.status).toBeLessThan(300);
+    expect(res.headers["access-control-allow-methods"]).toContain("PATCH");
   });
 });
 

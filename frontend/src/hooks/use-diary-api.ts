@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client.api';
-import type { DiaryDay } from '@/routes/_private/painel/@interface/diary';
+import type { DiaryDay, Entry } from '@/routes/_private/painel/@interface/diary';
 
 export const diaryKeys = {
   all: ['diary'] as const,
@@ -39,4 +39,21 @@ export function useConfirmMention() {
 
 export function useRejectMention() {
   return useDiaryAction((id) => `/mentions/${id}/reject`);
+}
+
+/**
+ * Corrige a descrição de um registro enviado pelo bot. Único campo editável —
+ * foto, obra, data e autor são imutáveis, e a correção fica na trilha de
+ * auditoria. O dia do registro não muda: o PDF já emitido só reflete a
+ * correção se o relatório daquele dia for gerado de novo.
+ */
+export function useUpdateEntryDescription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, description }: { id: number; description: string }) => {
+      const response = await api.patch<Entry>(`/entries/${id}`, { description });
+      return response.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: diaryKeys.all }),
+  });
 }

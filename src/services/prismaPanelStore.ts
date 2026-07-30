@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { EntryMentionIdentifier } from "./entryMentionIdentifier";
 import {
   AssetInUseError,
   DuplicateAssetCodeError,
@@ -102,8 +103,54 @@ const PERSON_SELECT = {
   projectId: true
 } as const;
 
+const ENTRY_INCLUDE = {
+  user: { select: { name: true } },
+  editedBy: { select: { name: true } },
+  mentions: true,
+  media: {
+    orderBy: { id: "asc" },
+    take: 1
+  },
+  _count: { select: { media: true } }
+} as const satisfies Prisma.EntryInclude;
+
+type EntryRow = Prisma.EntryGetPayload<{ include: typeof ENTRY_INCLUDE }>;
+
+function mapEntry(entry: EntryRow): EntryRecord {
+  return {
+    id: entry.id,
+    createdAt: entry.createdAt,
+    description: entry.description,
+    authorName: entry.user.name,
+    media:
+      entry.media[0] != null
+        ? {
+            id: entry.media[0].id,
+            mediaType: entry.media[0].mediaType
+          }
+        : null,
+    mediaCount: entry._count.media,
+    editedAt: entry.editedAt,
+    editedByName: entry.editedBy?.name ?? null,
+    mentions: entry.mentions.map((m) => ({
+      id: m.id,
+      entityType: m.entityType,
+      entityId: m.entityId,
+      source: m.source,
+      confidence: m.confidence,
+      matchedText: m.matchedText,
+      confirmed: m.confirmed
+    }))
+  };
+}
+
 export class PrismaPanelStore implements PanelStore {
-  constructor(private readonly prisma: PrismaClient) {}
+  /** Reconciliação de menções de código, compartilhada com o store do bot. */
+  private readonly mentions: EntryMentionIdentifier;
+
+  constructor(private readonly prisma: PrismaClient) {
+    this.mentions = new EntryMentionIdentifier(prisma);
+  }
 
   async getProject(projectId?: number): Promise<ProjectRecord | null> {
     const project = projectId
@@ -135,41 +182,50 @@ export class PrismaPanelStore implements PanelStore {
         projectId: input.projectId,
         createdAt: { gte: input.start, lt: input.end }
       },
-      include: {
-        user: { select: { name: true } },
-        mentions: true,
-        media: {
-          orderBy: { id: "asc" },
-          take: 1
-        },
-        _count: { select: { media: true } }
-      },
+      include: ENTRY_INCLUDE,
       orderBy: { createdAt: "desc" }
     });
 
-    return entries.map((entry) => ({
-      id: entry.id,
-      createdAt: entry.createdAt,
-      description: entry.description,
-      authorName: entry.user.name,
-      media:
-        entry.media[0] != null
-          ? {
-              id: entry.media[0].id,
-              mediaType: entry.media[0].mediaType
-            }
-          : null,
-      mediaCount: entry._count.media,
-      mentions: entry.mentions.map((m) => ({
-        id: m.id,
-        entityType: m.entityType,
-        entityId: m.entityId,
-        source: m.source,
-        confidence: m.confidence,
-        matchedText: m.matchedText,
-        confirmed: m.confirmed
-      }))
-    }));
+    return entries.map(mapEntry);
+  }
+
+  async findEntryById(id: bigint): Promise<EntryRecord | null> {
+    const entry = await this.prisma.entry.findUnique({
+      where: { id },
+      include: ENTRY_INCLUDE
+    });
+
+    return entry ? mapEntry(entry) : null;
+  }
+
+  async updateEntryDescription(input: {
+    entryId: bigint;
+    description: string;
+    editedByPanelUserId: number;
+  }): Promise<EntryRecord | null> {
+    const entry = await this.prisma.entry.findUnique({
+      where: { id: input.entryId },
+      select: { id: true, sectorId: true, procedureNumber: true }
+    });
+    if (!entry) {
+      return null;
+    }
+
+    await this.prisma.entry.update({
+      where: { id: input.entryId },
+      data: {
+        description: input.description,
+        editedAt: new Date(),
+        editedByPanelUserId: input.editedByPanelUserId
+      }
+    });
+
+    // Mesmo texto varrido na criação (ver PrismaConversationStore): o número do
+    // procedimento entra na varredura junto da descrição.
+    const scanText = [entry.procedureNumber, input.description].filter(Boolean).join(" ");
+    await this.mentions.sync(entry.id, entry.sectorId, scanText);
+
+    return this.findEntryById(input.entryId);
   }
 
   async findMediaById(id: bigint): Promise<MediaRecord | null> {

@@ -23,8 +23,9 @@ const searchSchema = z.object({
 
 type SearchParams = z.infer<typeof searchSchema>;
 
-// Ações auditadas (fase 1: relatórios). value = action no backend; label via i18n.
+// Ações auditadas. value = action no backend; label via i18n.
 const ACTION_OPTIONS = [
+  'entry.description.updated',
   'report.generated',
   'report.email.sent',
   'report.email.failed',
@@ -192,7 +193,7 @@ function AuditLogsPage() {
   );
 }
 
-/** Resumo legível do metadata do log (obra, destinatários, arquivo, erro). */
+/** Resumo legível do metadata do log (obra, destinatários, arquivo, erro, correção de texto). */
 function describeMetadata(log: AuditLog): string {
   const m = log.metadata ?? {};
   const parts: string[] = [];
@@ -200,6 +201,14 @@ function describeMetadata(log: AuditLog): string {
   if (typeof m.date === 'string') parts.push(m.date);
   if (Array.isArray(m.recipients) && m.recipients.length > 0) parts.push(m.recipients.join(', '));
   if (typeof m.filename === 'string') parts.push(m.filename);
+  // Correção de descrição: o valor do log é o antes/depois do texto.
+  if (typeof m.before === 'string' || typeof m.after === 'string') {
+    parts.push(`"${truncate(String(m.before ?? ''))}" → "${truncate(String(m.after ?? ''))}"`);
+  }
   if (typeof m.error === 'string') parts.push(m.error);
   return parts.join(' · ');
+}
+
+function truncate(value: string, max = 60): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }

@@ -44,7 +44,7 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
   router.use(
     cors({
       origin: options.corsOrigins ?? ["http://localhost:5173"],
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Authorization", "Content-Type"],
       // Permite o frontend ler o nome do arquivo do diário mesmo em cross-origin.
       exposedHeaders: ["Content-Disposition"]
@@ -112,6 +112,54 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
       next(error);
     }
   });
+
+  // Correção de texto de um registro já enviado pelo bot. Só a descrição é
+  // editável, só pelo painel e só por usuário de gestão — o antes/depois vai
+  // para a trilha de auditoria (ver GET /audit-logs).
+  router.patch(
+    "/entries/:id",
+    requirePanelRole("ADMIN", "MANAGER"),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+      try {
+        if (!/^\d+$/.test(req.params.id)) {
+          res.status(400).json({ error: "invalid_id" });
+          return;
+        }
+
+        const { description } = (req.body ?? {}) as { description?: unknown };
+        if (typeof description !== "string") {
+          res.status(400).json({ error: "invalid_description" });
+          return;
+        }
+
+        const trimmed = description.trim();
+        if (!trimmed || trimmed.length > MAX_DESCRIPTION_LENGTH) {
+          res.status(400).json({ error: "invalid_description" });
+          return;
+        }
+
+        // requirePanelRole garante o ator; o if é só para o type narrowing.
+        if (!req.panelUser) {
+          res.status(401).json({ error: "unauthorized" });
+          return;
+        }
+
+        const entry = await service.updateEntryDescription({
+          actor: { id: req.panelUser.sub, email: req.panelUser.email },
+          entryId: BigInt(req.params.id),
+          description: trimmed
+        });
+        if (!entry) {
+          res.status(404).json({ error: "entry_not_found" });
+          return;
+        }
+
+        res.json(entry);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
 
   router.get("/media/:id", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -1061,6 +1109,9 @@ function parseWhatsappUserInput(body: unknown): WhatsappUserInput | null {
 }
 
 const PANEL_USER_ROLES: PanelUserRole[] = ["ADMIN", "MANAGER"];
+
+/** Limite da descrição corrigida no painel — folga sobre a legenda do WhatsApp. */
+const MAX_DESCRIPTION_LENGTH = 2000;
 
 function parsePanelUserInput(body: unknown, options: { requirePassword: boolean }): PanelUserInput | null {
   if (typeof body !== "object" || body === null) {

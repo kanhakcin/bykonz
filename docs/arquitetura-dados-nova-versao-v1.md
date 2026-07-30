@@ -142,7 +142,10 @@ _Regra do alerta:_ registro que vincula `maquina` cuja vistoria mais recente est
 ### 4.6 Registros, vínculos e alertas
 
 **`entrada`** _(evolui a atual `Entrada`)_ — o registro de diário/vistoria.
-`id` · `projeto_id` (FK) · `setor_id` (FK) · `ativo_id` (FK, nullable na v1) · `autor_usuario_id` (FK) · `categoria` · `descricao` (legenda bruta) · `data` · `status`
+`id` · `projeto_id` (FK) · `setor_id` (FK) · `ativo_id` (FK, nullable na v1) · `autor_usuario_id` (FK) · `categoria` · `descricao` (legenda bruta) · `data` · `status` · `edited_at`/`edited_by_panel_user_id` (nullable — correção de texto pelo painel)
+
+_Correção de descrição:_ o bot é **append-only** — não edita nem apaga registro. A única correção possível é a **descrição**, feita no **painel** por usuário de gestão (ADMIN/MANAGER) via `PATCH /api/v1/entries/:id`. Foto, obra, data e autor são imutáveis; foto errada exige registro novo. O texto anterior fica na trilha de auditoria (`audit_logs`, ação `entry.description.updated`, metadata `before`/`after`), e as colunas `edited_at`/`edited_by_panel_user_id` existem para o painel marcar o registro como editado.
+_Consequências:_ (a) as menções de **origem CODIGO** são reconciliadas com o texto novo — código que sai do texto leva embora a menção e os alertas que ela gerou (ver §5); menções de IA/MANUAL/QR e alertas de menções ainda válidas são preservados como _snapshot_ (§6). (b) `data`/`created_at` **não** muda: o registro continua no dia original, então o PDF já emitido só reflete a correção quando o relatório **daquele dia** é gerado novamente (a numeração DO é reusada — mesmo número, mesmo nome de arquivo).
 
 **`entrada_media`** _(reaproveita a atual `_EntradaMedia`)_ — fotos/mídias. `id` · `entrada_id` (FK) · `media_url`.
 

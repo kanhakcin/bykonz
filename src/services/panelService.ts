@@ -50,6 +50,10 @@ export interface EntryRecord {
   mentions: MentionRecord[];
   media: { id: bigint; mediaType: string | null } | null;
   mediaCount: number;
+  /** Quando a descrição foi corrigida pelo painel; null se nunca foi editada. */
+  editedAt: Date | null;
+  /** Nome do usuário do painel que fez a última correção. */
+  editedByName: string | null;
 }
 
 export interface MediaRecord {
@@ -328,6 +332,12 @@ export interface WhatsappUserListResult {
 export interface PanelStore {
   getProject(projectId?: number): Promise<ProjectRecord | null>;
   findEntriesForDay(input: { projectId: number; start: Date; end: Date }): Promise<EntryRecord[]>;
+  findEntryById(id: bigint): Promise<EntryRecord | null>;
+  /**
+   * Corrige a descrição do registro e reconcilia as menções de código com o
+   * texto novo. Retorna o registro atualizado, ou null se o id não existe.
+   */
+  updateEntryDescription(input: { entryId: bigint; description: string; editedByPanelUserId: number }): Promise<EntryRecord | null>;
   findAlertsForEntries(entryIds: bigint[]): Promise<AlertRecord[]>;
   findMediaById(id: bigint): Promise<MediaRecord | null>;
   findStandardsByIds(ids: number[]): Promise<CodeRef[]>;
@@ -413,6 +423,10 @@ export interface DiaryEntry {
   status: EntryStatus;
   mediaUrl: string | null;
   mediaCount: number;
+  /** ISO 8601 da última correção de texto feita no painel; null se original. */
+  editedAt: string | null;
+  /** Nome do gestor que corrigiu, para o painel exibir junto do selo "editado". */
+  editedBy: string | null;
 }
 
 export interface DiaryAlert {
@@ -536,6 +550,83 @@ export class PanelService {
   }
 
   /**
+   * Corrige a descrição de um registro já enviado pelo bot — o único campo
+   * editável (foto, obra, data e autor são imutáveis). O texto anterior fica
+   * na trilha de auditoria, e as menções de código são reconciliadas com o
+   * texto novo pelo store.
+   *
+   * Devolve null quando o registro não existe. Correções não mudam o dia do
+   * registro (`createdAt` é preservado): para o PDF já emitido refletir a
+   * correção é preciso gerar o relatório daquele dia novamente.
+   */
+  async updateEntryDescription(input: {
+    actor: PanelActor;
+    entryId: bigint;
+    description: string;
+  }): Promise<DiaryEntry | null> {
+    const before = await this.store.findEntryById(input.entryId);
+    if (!before) {
+      return null;
+    }
+
+    const updated = await this.store.updateEntryDescription({
+      entryId: input.entryId,
+      description: input.description,
+      editedByPanelUserId: input.actor.id
+    });
+    if (!updated) {
+      return null;
+    }
+
+    await this.recordEntryDescriptionEdited({
+      actor: input.actor,
+      entryId: input.entryId,
+      before: before.description,
+      after: input.description,
+      recordedAt: before.createdAt
+    });
+
+    const alerts = await this.store.findAlertsForEntries([updated.id]);
+    const labels = await this.resolveLabels([updated]);
+
+    return toDiaryEntry(
+      updated,
+      alerts.filter((a) => a.status === "OPEN"),
+      labels
+    );
+  }
+
+  /** Trilha da correção: guarda o texto antes e depois (best-effort). */
+  private async recordEntryDescriptionEdited(input: {
+    actor: PanelActor;
+    entryId: bigint;
+    before: string | null;
+    after: string;
+    recordedAt: Date;
+  }): Promise<void> {
+    if (!this.options.auditLogger) {
+      return;
+    }
+    try {
+      await this.options.auditLogger.record({
+        actorType: "PANEL_USER",
+        actorId: String(input.actor.id),
+        actorLabel: input.actor.email,
+        action: "entry.description.updated",
+        entityType: "ENTRY",
+        entityId: input.entryId.toString(),
+        metadata: {
+          before: input.before,
+          after: input.after,
+          recordedAt: input.recordedAt.toISOString()
+        }
+      });
+    } catch (error) {
+      console.error("[panel] Falha ao auditar correção de descrição:", error);
+    }
+  }
+
+  /**
    * Envia um e-mail de teste para os destinatários informados, para validar na
    * hora a configuração de e-mail da obra (SMTP + endereços). Lança se o envio
    * falhar (o router traduz para um erro 502); devolve um código quando a
@@ -596,36 +687,9 @@ export class PanelService {
 
     const entryTimes = new Map(entries.map((e) => [e.id.toString(), this.formatTime(e.createdAt)]));
 
-    const diaryEntries: DiaryEntry[] = entries.map((entry) => {
-      const open = openByEntry.get(entry.id.toString()) ?? [];
-      const status: EntryStatus = open.some((a) => a.severity === "CRITICAL")
-        ? "CRITICAL"
-        : open.length > 0
-          ? "ALERT"
-          : "COMPLIANT";
-
-      return {
-        id: Number(entry.id),
-        recordedAt: entry.createdAt.toISOString(),
-        description: entry.description ?? "",
-        author: {
-          name: entry.authorName ?? "—",
-          initials: initialsOf(entry.authorName)
-        },
-        mentions: entry.mentions.map((m) => ({
-          id: m.id,
-          entityType: m.entityType,
-          entityId: m.entityId,
-          label: labels.labelFor(m),
-          source: m.source,
-          confidence: m.confidence,
-          confirmed: m.confirmed
-        })),
-        status,
-        mediaUrl: entry.media ? `/media/${entry.media.id.toString()}` : null,
-        mediaCount: entry.mediaCount
-      };
-    });
+    const diaryEntries: DiaryEntry[] = entries.map((entry) =>
+      toDiaryEntry(entry, openByEntry.get(entry.id.toString()) ?? [], labels)
+    );
 
     const diaryAlerts: DiaryAlert[] = openAlerts.map((alert) => {
       const time = entryTimes.get(alert.entryId.toString()) ?? "--:--";
@@ -1174,6 +1238,47 @@ export class WhatsappUserHasEntriesError extends Error {
     super(`WhatsApp user ${id} has diary entries and cannot be deleted`);
     this.name = "WhatsappUserHasEntriesError";
   }
+}
+
+/**
+ * Monta o DTO de um registro do diário. Compartilhado pelo dia inteiro
+ * (getDiaryDay) e pela resposta da correção de descrição, para que os dois
+ * caminhos devolvam exatamente a mesma forma ao painel.
+ */
+function toDiaryEntry(
+  entry: EntryRecord,
+  openAlerts: AlertRecord[],
+  labels: { labelFor(mention: MentionRecord): string }
+): DiaryEntry {
+  const status: EntryStatus = openAlerts.some((a) => a.severity === "CRITICAL")
+    ? "CRITICAL"
+    : openAlerts.length > 0
+      ? "ALERT"
+      : "COMPLIANT";
+
+  return {
+    id: Number(entry.id),
+    recordedAt: entry.createdAt.toISOString(),
+    description: entry.description ?? "",
+    author: {
+      name: entry.authorName ?? "—",
+      initials: initialsOf(entry.authorName)
+    },
+    mentions: entry.mentions.map((m) => ({
+      id: m.id,
+      entityType: m.entityType,
+      entityId: m.entityId,
+      label: labels.labelFor(m),
+      source: m.source,
+      confidence: m.confidence,
+      confirmed: m.confirmed
+    })),
+    status,
+    mediaUrl: entry.media ? `/media/${entry.media.id.toString()}` : null,
+    mediaCount: entry.mediaCount,
+    editedAt: entry.editedAt ? entry.editedAt.toISOString() : null,
+    editedBy: entry.editedByName
+  };
 }
 
 function initialsOf(name: string | null): string {

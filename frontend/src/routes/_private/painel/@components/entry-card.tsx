@@ -1,12 +1,21 @@
 import type { LucideIcon } from 'lucide-react';
-import { Ban, CheckCircle2, Cog, Image as ImageIcon, TriangleAlert, User } from 'lucide-react';
+import { Ban, CheckCircle2, Cog, Image as ImageIcon, Pencil, PencilLine, TriangleAlert, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useUpdateEntryDescription } from '@/hooks/use-diary-api';
 import { loadMediaObjectUrl } from '@/lib/api/media';
+import { formatDate } from '@/lib/helpers/format-date.helper';
 import { cn } from '@/lib/utils/cn.util';
 import type { Entry, Mention } from '@/routes/_private/painel/@interface/diary';
+
+/** Espelha MAX_DESCRIPTION_LENGTH do backend (src/api/panelRouter.ts). */
+const MAX_DESCRIPTION_LENGTH = 2000;
 
 const MENTION_ICON: Partial<Record<Mention['entityType'], LucideIcon>> = {
   PERSON: User,
@@ -42,12 +51,50 @@ function timeOf(dateISO: string) {
   return new Date(dateISO).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Selo de texto corrigido no painel — o registro do bot em si é imutável. */
+function EditedBadge({ entry }: { entry: Entry }) {
+  const { t } = useTranslation();
+  if (!entry.editedAt) return null;
+
+  const when = formatDate(new Date(entry.editedAt), 'Pp');
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+            <PencilLine className="size-3.5" aria-hidden />
+            {t('painel.entry.edited')}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{entry.editedBy ? t('painel.entry.editedBy', { name: entry.editedBy, date: when }) : when}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export function EntryCard({ entry }: { entry: Entry }) {
   const { t } = useTranslation();
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [isImageOpen, setIsImageOpen] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const updateDescription = useUpdateEntryDescription();
   const status = STATUS_BADGE[entry.status];
   const StatusIcon = status.icon;
+  const isEditing = draft !== null;
+  const trimmedDraft = draft?.trim() ?? '';
+  const canSave = trimmedDraft !== '' && trimmedDraft !== entry.description && trimmedDraft.length <= MAX_DESCRIPTION_LENGTH;
+
+  async function saveDraft() {
+    if (!canSave) return;
+    try {
+      await updateDescription.mutateAsync({ id: entry.id, description: trimmedDraft });
+      setDraft(null);
+      // O registro continua no dia original: o PDF já enviado só muda se for gerado de novo.
+      toast.success(t('painel.entry.editSaved'));
+    } catch {
+      // Erros HTTP já geram toast no client da API.
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +138,26 @@ export function EntryCard({ entry }: { entry: Entry }) {
         <span className="absolute bottom-1 left-1 rounded bg-background/80 px-1 font-mono text-[10px]">{timeOf(entry.recordedAt)}</span>
       </button>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="text-sm">{entry.description}</div>
+        {isEditing ? (
+          <div className="flex flex-col gap-2">
+            <Textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={MAX_DESCRIPTION_LENGTH} rows={3} autoFocus aria-label={t('description')} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={!canSave || updateDescription.isPending} onClick={saveDraft}>
+                {t('save')}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={updateDescription.isPending} onClick={() => setDraft(null)}>
+                {t('cancel')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-sm">{entry.description}</div>
+            <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={t('painel.entry.editDescription')} onClick={() => setDraft(entry.description)}>
+              <Pencil className="size-3.5" aria-hidden />
+            </Button>
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {entry.mentions.map((m) => (
             <MentionTag key={m.id} mention={m} />
@@ -102,9 +168,12 @@ export function EntryCard({ entry }: { entry: Entry }) {
             <span className="flex size-5 items-center justify-center rounded-full bg-accent font-medium text-[10px]">{entry.author.initials}</span>
             {entry.author.name}
           </span>
-          <Badge variant={status.variant}>
-            <StatusIcon size={13} aria-hidden /> {t(status.labelKey)}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <EditedBadge entry={entry} />
+            <Badge variant={status.variant}>
+              <StatusIcon size={13} aria-hidden /> {t(status.labelKey)}
+            </Badge>
+          </div>
         </div>
       </div>
 

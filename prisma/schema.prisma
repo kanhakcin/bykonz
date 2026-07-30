@@ -454,6 +454,8 @@ model PanelUser {
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  editedEntries Entry[]
+
   @@map("panel_users")
 }
 
@@ -510,12 +512,19 @@ model Entry {
   procedureNumber String?  @map("procedure_number")
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  // Correção de texto feita pelo painel (o bot é append-only): apenas a
+  // descrição é editável — foto, obra, data e autor são imutáveis. O texto
+  // anterior fica na trilha de auditoria (action entry.description.updated);
+  // estas colunas existem para o painel marcar o registro como "editado".
+  editedAt            DateTime? @map("edited_at") @db.Timestamptz(6)
+  editedByPanelUserId Int?      @map("edited_by_panel_user_id")
 
   user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
   company  Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
   project  Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
   sector   Sector?       @relation(fields: [sectorId], references: [id], onDelete: SetNull)
   asset    Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  editedBy PanelUser?    @relation(fields: [editedByPanelUserId], references: [id], onDelete: SetNull)
   media    EntryMedia[]
   training Training?
   mentions EntryMention[]

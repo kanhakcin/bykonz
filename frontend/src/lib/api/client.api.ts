@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
 import i18n from '@/lib/config/i18n.config';
 
-const baseURL = import.meta.env.VITE_URI_BASE || 'http://localhost:3002/';
+const baseURL = import.meta.env.VITE_URI_BASE ?? (import.meta.env.DEV ? '/' : 'http://localhost:8080/');
 const timeout = parseInt(import.meta.env.VITE_URI_TIMEOUT || '30000', 10);
 
 export class ApiError extends Error {

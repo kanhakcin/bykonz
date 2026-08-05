@@ -95,6 +95,24 @@ enum ItemResult {
   NA
 }
 
+/// Tipo de atendimento da mobilização técnica (Relatórios Técnicos Bykonz).
+enum AttendanceType {
+  SITE_SURVEY
+  INSTALLATION
+  MAINTENANCE
+  DIAGNOSIS
+  COMMISSIONING
+  TECHNICAL_SUPPORT
+}
+
+/// Status de uma pendência técnica sugerida pela IA ou cadastrada manualmente.
+enum PendingStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
 // ---------------------------------------------------------------------------
 // Multi-sector configuration
 // ---------------------------------------------------------------------------
@@ -165,8 +183,123 @@ model Company {
   projects  Project[]
   people    Person[]
   entries   Entry[]
+  vessels   Vessel[]
 
   @@map("companies")
+}
+
+model Vessel {
+  id           Int      @id @default(autoincrement())
+  companyId    BigInt?  @map("company_id")
+  name         String
+  code         String?
+  imo          String?
+  mmsi         String?
+  vesselType   String?  @map("vessel_type")
+  vesselClass  String?  @map("vessel_class")
+  flag         String?
+  port         String?
+  location     String?
+  model        String?
+  manufacturer String?
+  observations String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company                Company?                @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  mobilizations          VesselMobilization[]
+  reports                VesselReport[]
+  memories               TechnicalMemory[]
+  technicalMobilizations TechnicalMobilization[]
+
+  @@map("vessels")
+}
+
+model VesselMobilization {
+  id               Int       @id @default(autoincrement())
+  vesselId         Int       @map("vessel_id")
+  reportCode       String    @unique @map("report_code")
+  title            String?
+  serviceType      String?   @map("service_type")
+  objective        String?
+  location         String?
+  technicianName   String?   @map("technician_name")
+  mobilizationDate DateTime? @map("mobilization_date")
+  status           String    @default("DRAFT")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vessel        Vessel               @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  evidences     VesselEvidence[]
+  pendingIssues VesselPendingIssue[]
+  equipment     VesselEquipment[]
+  reports       VesselReport[]
+
+  @@map("vessel_mobilizations")
+}
+
+model VesselEvidence {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  category       String
+  observation    String?
+  description    String?
+  ocrText        String?  @map("ocr_text")
+  attachmentType String?  @map("attachment_type")
+  attachmentMime String?  @map("attachment_mime")
+  attachmentData String?  @map("attachment_data")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization VesselMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("vessel_evidences")
+}
+
+model VesselPendingIssue {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  system         String
+  description    String
+  responsible    String?
+  status         String   @default("OPEN")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization VesselMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("vessel_pending_issues")
+}
+
+model VesselEquipment {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  name           String
+  manufacturer   String?
+  model          String?
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization VesselMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("vessel_equipment")
+}
+
+model VesselReport {
+  id             Int      @id @default(autoincrement())
+  vesselId       Int      @map("vessel_id")
+  mobilizationId Int      @map("mobilization_id")
+  title          String
+  reportCode     String   @map("report_code")
+  summary        String?
+  conclusion     String?
+  content        String
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vessel       Vessel             @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  mobilization VesselMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("vessel_reports")
 }
 
 model Project {
@@ -191,13 +324,14 @@ model Project {
   createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  company            Company             @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  sector             Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  assets             Asset[]
-  machines           Machine[]
-  people             Person[]
-  entries            Entry[]
-  dailyReportNumbers DailyReportNumber[]
+  company                Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  sector                 Sector                  @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  assets                 Asset[]
+  machines               Machine[]
+  people                 Person[]
+  entries                Entry[]
+  dailyReportNumbers     DailyReportNumber[]
+  technicalMobilizations TechnicalMobilization[]
 
   @@unique([companyId, code])
   @@index([sectorId])
@@ -218,6 +352,182 @@ model DailyReportNumber {
 
   @@unique([projectId, reportDate])
   @@map("daily_report_numbers")
+}
+
+model TechnicalMobilization {
+  id               Int             @id @default(autoincrement())
+  projectId        Int             @map("project_id")
+  // Vinculo opcional com a embarcação (modelo Vessel) para o histórico técnico
+  // permanente por embarcação e para a memória de IA.
+  vesselId         Int?            @map("vessel_id")
+  reportCode       String          @unique @map("report_code")
+  clientName       String?         @map("client_name")
+  vesselName       String?         @map("vessel_name")
+  serviceType      String?         @map("service_type")
+  // Tipo estruturado de atendimento (Site Survey, Instalação, Manutenção, ...).
+  attendanceType   AttendanceType? @map("attendance_type")
+  siteLocation     String?         @map("site_location")
+  mobilizationDate DateTime?       @map("mobilization_date")
+  technicianName   String?         @map("technician_name")
+  objective        String?
+  status           String          @default("DRAFT")
+  // Resumo da memória técnica acumulada da embarcação (gerado pela IA a partir
+  // dos relatórios anteriores) consultado na geração do relatório atual.
+  aiMemorySummary  String?         @map("ai_memory_summary")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project       Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vessel        Vessel?                 @relation(fields: [vesselId], references: [id], onDelete: SetNull)
+  evidences     TechnicalEvidence[]
+  pendingIssues TechnicalPendingIssue[]
+  equipment     TechnicalEquipment[]
+  inventory     TechnicalInventory[]
+  reports       TechnicalReport[]
+
+  @@index([vesselId])
+  @@map("technical_mobilizations")
+}
+
+model TechnicalEvidence {
+  id                  Int      @id @default(autoincrement())
+  mobilizationId      Int      @map("mobilization_id")
+  category            String
+  // Pequena observação do técnico (opcional).
+  observation         String?
+  // Descrição técnica gerada automaticamente pela IA (editável pelo técnico).
+  aiDescription       String?  @map("ai_description")
+  // Confiança da classificação/descrição da IA (0..1).
+  aiConfidence        Float?   @map("ai_confidence")
+  // Tags técnicas identificadas pela IA (ex.: switch, rack, ipc, camera).
+  aiTags              String[] @default([]) @map("ai_tags")
+  // Equipamentos identificados pela IA na imagem (ex.: "Siemens IoT2050").
+  equipmentIdentified String[] @default([]) @map("equipment_identified")
+  manufacturer        String?
+  model               String?
+  serialNumber        String?  @map("serial_number")
+  // Texto OCR extraído (etiquetas, alarmes, telas de supervisório).
+  ocrText             String?  @map("ocr_text")
+  // Ordem automática de organização dentro da categoria (definida pela IA).
+  orderIndex          Int      @default(0) @map("order_index")
+  attachmentType      String?  @map("attachment_type")
+  attachmentMime      String?  @map("attachment_mime")
+  attachmentData      String?  @map("attachment_data")
+  // URLs adicionais (vídeo/documento opcionais) gerenciadas pelo S3.
+  videoUrl            String?  @map("video_url")
+  documentUrl         String?  @map("document_url")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization TechnicalMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId, category])
+  @@map("technical_evidences")
+}
+
+model TechnicalPendingIssue {
+  id             Int           @id @default(autoincrement())
+  mobilizationId Int           @map("mobilization_id")
+  system         String
+  description    String
+  responsible    String?
+  // Sugerida pela IA (true) ou cadastrada manualmente (false).
+  suggestedByAi  Boolean       @default(false) @map("suggested_by_ai")
+  status         PendingStatus @default(OPEN)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization TechnicalMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId, status])
+  @@map("technical_pending_issues")
+}
+
+model TechnicalEquipment {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  name           String
+  manufacturer   String?
+  model          String?
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization TechnicalMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("technical_equipment")
+}
+
+model TechnicalInventory {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  name           String
+  category       String?
+  quantity       Int      @default(1)
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization TechnicalMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@map("technical_inventory")
+}
+
+/// Memória técnica permanente por embarcação: guarda o embedding do conteúdo
+/// dos relatórios anteriores para permitir consultas semânticas (IA) e
+/// identificar pendências recorrentes, equipamentos instalados e evolução.
+model TechnicalMemory {
+  id          Int      @id @default(autoincrement())
+  vesselId    Int      @map("vessel_id")
+  reportId    Int?     @map("report_id")
+  contentType String   @default("TEXT") @map("content_type") // TEXT | VECTOR
+  content     String
+  // Vetor de embedding (JSON serializado) para busca semântica.
+  embedding   Json?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vessel Vessel?          @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  report TechnicalReport? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([vesselId, createdAt])
+  @@map("technical_memories")
+}
+
+model TechnicalReport {
+  id             Int       @id @default(autoincrement())
+  mobilizationId Int       @map("mobilization_id")
+  title          String
+  reportCode     String    @map("report_code")
+  summary        String?
+  conclusion     String?
+  content        String
+  metadata       Json?
+  // Token público para compartilhamento por link (expirável).
+  shareToken     String?   @unique @map("share_token")
+  shareExpiresAt DateTime? @map("share_expires_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization        TechnicalMobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+  memories            TechnicalMemory[]
+  technicalSignatures TechnicalSignature[]
+
+  @@index([mobilizationId])
+  @@map("technical_reports")
+}
+
+/// Assinaturas digitais do relatório (técnico, cliente, responsável técnico).
+model TechnicalSignature {
+  id            Int      @id @default(autoincrement())
+  reportId      Int      @map("report_id")
+  role          String
+  name          String
+  // Assinatura digital (hash/assinatura criptográfica) ou URL da imagem.
+  signatureData String?  @map("signature_data")
+  signedAt      DateTime @default(now()) @map("signed_at") @db.Timestamptz(6)
+
+  report TechnicalReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("technical_signatures")
 }
 
 model Asset {
@@ -279,9 +589,9 @@ model Person {
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  sector       Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  company      Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  project      Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sector           Sector              @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  company          Company?            @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  project          Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   aliases          PersonAlias[]
   competencies     Competency[]
   inspections      MachineInspection[] @relation("Inspector")
@@ -465,18 +775,18 @@ model PanelUser {
 // ---------------------------------------------------------------------------
 
 model User {
-  id             Int     @id @default(autoincrement())
-  phoneE164      String  @unique @map("phone_e164")
+  id             Int      @id @default(autoincrement())
+  phoneE164      String   @unique @map("phone_e164")
   // Identidade do operador no Telegram (numérica, como string). Fica ao lado do
   // telefone: o match de acesso passa a ser por telefone (WhatsApp) OU por
   // telegram id (Telegram). Ver docs/plano-suporte-telegram.md.
-  telegramUserId String? @unique @map("telegram_user_id")
+  telegramUserId String?  @unique @map("telegram_user_id")
   name           String?
   role           String?
   // Libera/bloqueia a resposta do bot sem apagar o registro (entries preservados).
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   companies UserCompany[]
   entries   Entry[]
@@ -500,18 +810,18 @@ model UserCompany {
 // ---------------------------------------------------------------------------
 
 model Entry {
-  id              BigInt   @id @default(autoincrement())
-  userId          Int      @map("user_id")
-  companyId       BigInt?  @map("company_id")
-  projectId       Int?     @map("project_id")
-  sectorId        Int?     @map("sector_id")
-  assetId         Int?     @map("asset_id")
-  category        String?
-  description     String?
-  serviceType     String?  @map("service_type")
-  procedureNumber String?  @map("procedure_number")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  BigInt    @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  companyId           BigInt?   @map("company_id")
+  projectId           Int?      @map("project_id")
+  sectorId            Int?      @map("sector_id")
+  assetId             Int?      @map("asset_id")
+  category            String?
+  description         String?
+  serviceType         String?   @map("service_type")
+  procedureNumber     String?   @map("procedure_number")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   // Correção de texto feita pelo painel (o bot é append-only): apenas a
   // descrição é editável — foto, obra, data e autor são imutáveis. O texto
   // anterior fica na trilha de auditoria (action entry.description.updated);
@@ -519,12 +829,12 @@ model Entry {
   editedAt            DateTime? @map("edited_at") @db.Timestamptz(6)
   editedByPanelUserId Int?      @map("edited_by_panel_user_id")
 
-  user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
-  company  Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  project  Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  sector   Sector?       @relation(fields: [sectorId], references: [id], onDelete: SetNull)
-  asset    Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  editedBy PanelUser?    @relation(fields: [editedByPanelUserId], references: [id], onDelete: SetNull)
+  user     User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  company  Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  project  Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  sector   Sector?        @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  asset    Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  editedBy PanelUser?     @relation(fields: [editedByPanelUserId], references: [id], onDelete: SetNull)
   media    EntryMedia[]
   training Training?
   mentions EntryMention[]

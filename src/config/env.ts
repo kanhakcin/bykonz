@@ -29,6 +29,11 @@ export interface AppConfig {
   smtpPass: string | undefined;
   smtpFrom: string | undefined;
   smtpSecure: boolean;
+  /** OpenAI — opcional; presente apenas se OPENAI_API_KEY existir. */
+  openaiApiKey: string | undefined;
+  openaiModel: string | undefined;
+  openaiVisionModel: string | undefined;
+  openaiEmbeddingModel: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -93,7 +98,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // aceitando valores comuns (true/1/yes/ssl/tls). Sem valor reconhecido, infere
     // pela porta (465 → secure). Evita o clássico "Greeting never received" quando
     // a porta e o modo TLS ficam incompatíveis.
-    smtpSecure: parseSmtpSecure(env.SMTP_SECURE, smtpPort)
+    smtpSecure: parseSmtpSecure(env.SMTP_SECURE, smtpPort),
+    openaiApiKey: env.OPENAI_API_KEY,
+    openaiModel: env.OPENAI_MODEL ?? "gpt-4o-mini",
+    openaiVisionModel: env.OPENAI_VISION_MODEL ?? "gpt-4o-mini",
+    openaiEmbeddingModel: env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small"
   };
 }
 
@@ -123,3 +132,4 @@ export function normalizeUrlOriginAndPath(value: string, name: string): string {
 
   return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
 }
+

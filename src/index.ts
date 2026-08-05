@@ -1,9 +1,14 @@
 import { createApp } from "./app";
 import { createPanelRouter } from "./api/panelRouter";
+import { createTechnicalReportRouter } from "./api/technicalReportRouter";
+import { createVesselRouter } from "./api/vesselRouter";
+import { createVesselAiRouter } from "./api/vesselAiRouter";
 import { loadConfig } from "./config/env";
 import { createConversationService, createPanelService, createDailyReportJobDeps } from "./container";
 import { prisma } from "./lib/prisma";
 import { scheduleDailyReportJob } from "./jobs/dailyReportJob";
+import { TechnicalReportService } from "./services/technicalReportService";
+import { VesselReportService } from "./services/vesselReportService";
 
 const config = loadConfig();
 
@@ -19,9 +24,16 @@ if (config.panelJwtSecret) {
   console.warn("PANEL_JWT_SECRET not set — manager panel API (/api/v1) is disabled.");
 }
 
+const technicalReportRouter = createTechnicalReportRouter(new TechnicalReportService());
+const vesselRouter = createVesselRouter(new VesselReportService());
+const vesselAiRouter = createVesselAiRouter();
+
 const app = createApp(createConversationService(config), config.webhookSecret, {
   panelRouter,
-  telegramWebhookSecret: config.telegramWebhookSecret
+  telegramWebhookSecret: config.telegramWebhookSecret,
+  panelRouterExtra: technicalReportRouter,
+  vesselRouter,
+  vesselAiRouter,
 });
 const PORT = process.env.PORT || 8080;
 

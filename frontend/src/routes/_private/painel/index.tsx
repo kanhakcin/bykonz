@@ -14,7 +14,9 @@ import { useProjectFilter } from '@/hooks/use-project-filter';
 import { formatDate, getDateLocale } from '@/lib/helpers/format-date.helper';
 import { AlertsPanel } from '@/routes/_private/painel/@components/alerts-panel';
 import { EntryCard } from '@/routes/_private/painel/@components/entry-card';
+import { EvidenceManager } from '@/routes/_private/painel/@components/evidence-manager';
 import { TriagePanel } from '@/routes/_private/painel/@components/triage-panel';
+import { VesselManagementPanel } from '@/routes/_private/painel/@components/vessel-management-panel';
 
 export const Route = createFileRoute('/_private/painel/')({
   // Sem obra escolhida, volta para a home (galeria de seleção).
@@ -123,7 +125,9 @@ function PainelPage() {
                 )}
               </section>
 
-              <div className="flex flex-col gap-4">
+<div className="flex flex-col gap-4">
+                <VesselManagementPanel />
+                <EvidenceManager />
                 <AlertsPanel alerts={day.alerts} />
                 <TriagePanel items={day.triage} />
               </div>

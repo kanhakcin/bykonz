@@ -1,0 +1,647 @@
+// ============================================================================
+// Bykonz Marine Platform — Schema v2 (nova arquitetura de dados)
+// ============================================================================
+// Esta é a nova arquitetura de dados, criada EM PARALELO com o schema atual
+// (`schema.prisma`) para permitir migração incremental sem quebrar produção.
+//
+// Fluxo principal: Empresa → Cliente → Embarcação → Mobilização → Evidências
+//   → Análise por IA → Relatório → Histórico Técnico.
+//
+// Convenções:
+//   - Tabelas em snake_case plural via @@map.
+//   - Modelos Prisma em PascalCase singular.
+//   - Soft-delete via coluna deleted_at nas entidades de domínio.
+//   - Versionamento via coluna version (incrementada a cada update).
+//   - Índices em todas as FKs e campos de consulta frequente.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client-v2"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Tipo de atendimento da mobilização técnica.
+enum AttendanceType {
+  SITE_SURVEY
+  INSTALLATION
+  MAINTENANCE
+  DIAGNOSIS
+  COMMISSIONING
+  TECHNICAL_SUPPORT
+}
+
+/// Status de uma pendência técnica.
+enum PendingStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+/// Tipo de origem de uma análise de IA.
+enum AnalysisType {
+  VISION
+  OCR
+  REPORT_GENERATION
+  EMBEDDING
+}
+
+/// Perfil de usuário (RBAC).
+enum UserRole {
+  ADMIN
+  MANAGER
+  TECHNICIAN
+  VIEWER
+}
+
+/// Status de uma mobilização.
+enum MobilizationStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  APPROVED
+  CANCELLED
+}
+
+/// Tipo de mídia de evidência.
+enum MediaType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+}
+
+/// Status de uma notificação.
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Empresa e Cliente
+// ---------------------------------------------------------------------------
+
+/// Empresa (multi-tenant) — entidade raiz da hierarquia.
+model Company {
+  id        Int       @id @default(autoincrement())
+  name      String
+  cnpj      String?   @unique
+  legalName String?   @map("legal_name")
+  address   String?
+  logoUrl   String?   @map("logo_url")
+  active    Boolean   @default(true)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int       @default(1)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  clients        Client[]
+  vessels        Vessel[]
+  users          User[]
+  configurations Configuration[]
+  mobilizations  Mobilization[]
+  notifications  Notification[]
+
+  @@index([active])
+  @@map("companies")
+}
+
+/// Cliente de uma empresa.
+model Client {
+  id        Int       @id @default(autoincrement())
+  companyId Int       @map("company_id")
+  name      String
+  cnpj      String?   @unique
+  email     String?
+  phone     String?
+  address   String?
+  active    Boolean   @default(true)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version   Int       @default(1)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  mobilizations Mobilization[]
+
+  @@index([companyId, active])
+  @@map("clients")
+}
+
+// ---------------------------------------------------------------------------
+// Embarcação (entidade principal)
+// ---------------------------------------------------------------------------
+
+/// Embarcação — entidade principal do sistema marítimo.
+model Vessel {
+  id           Int       @id @default(autoincrement())
+  companyId    Int?      @map("company_id")
+  name         String
+  code         String?
+  imo          String?   @unique
+  mmsi         String?
+  vesselType   String?   @map("vessel_type")
+  vesselClass  String?   @map("vessel_class")
+  flag         String?
+  port         String?
+  location     String?
+  model        String?
+  manufacturer String?
+  builtYear    Int?      @map("built_year")
+  grossTonnage Float?    @map("gross_tonnage")
+  observations String?
+  active       Boolean   @default(true)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version      Int       @default(1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company         Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  mobilizations   Mobilization[]
+  equipments      Equipment[]
+  technicalMemory TechnicalMemory[]
+
+  @@index([companyId])
+  @@index([name])
+  @@index([active])
+  @@map("vessels")
+}
+
+// ---------------------------------------------------------------------------
+// Usuários e Segurança
+// ---------------------------------------------------------------------------
+
+/// Usuário da plataforma (acesso web).
+model User {
+  id           Int       @id @default(autoincrement())
+  companyId    Int?      @map("company_id")
+  name         String
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         UserRole  @default(TECHNICIAN)
+  phone        String?
+  avatarUrl    String?   @map("avatar_url")
+  active       Boolean   @default(true)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version      Int       @default(1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company       Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
+  mobilizations Mobilization[] @relation("TechnicianMobilizations")
+  notifications Notification[]
+
+  @@index([companyId])
+  @@index([active])
+  @@map("users")
+}
+
+/// Refresh token para renovação segura de sessão.
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Mobilização
+// ---------------------------------------------------------------------------
+
+/// Mobilização técnica — núcleo do fluxo de trabalho.
+model Mobilization {
+  id               Int                @id @default(autoincrement())
+  companyId        Int?               @map("company_id")
+  clientId         Int?               @map("client_id")
+  vesselId         Int                @map("vessel_id")
+  reportCode       String             @unique @map("report_code")
+  title            String?
+  serviceType      String?            @map("service_type")
+  attendanceType   AttendanceType?    @map("attendance_type")
+  siteLocation     String?            @map("site_location")
+  mobilizationDate DateTime?          @map("mobilization_date") @db.Timestamptz(6)
+  technicianUserId Int?               @map("technician_user_id")
+  technicianName   String?            @map("technician_name")
+  objective        String?
+  status           MobilizationStatus @default(DRAFT)
+  aiMemorySummary  String?            @map("ai_memory_summary")
+  deletedAt        DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  version          Int                @default(1)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company        Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  client         Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  vessel         Vessel         @relation(fields: [vesselId], references: [id], onDelete: Restrict)
+  technicianUser User?          @relation("TechnicianMobilizations", fields: [technicianUserId], references: [id], onDelete: SetNull)
+  evidences      Evidence[]
+  equipments     Equipment[]
+  tests          Test[]
+  pendingIssues  PendingIssue[]
+  diagnostics    Diagnostic[]
+  materials      Material[]
+  inventory      Inventory[]
+  reports        Report[]
+
+  @@index([vesselId, status])
+  @@index([clientId])
+  @@index([companyId])
+  @@index([mobilizationDate])
+  @@map("mobilizations")
+}
+
+// ---------------------------------------------------------------------------
+// Evidências
+// ---------------------------------------------------------------------------
+
+/// Evidência de uma mobilização (categoria + análise de IA).
+model Evidence {
+  id             Int       @id @default(autoincrement())
+  mobilizationId Int       @map("mobilization_id")
+  category       String
+  observation    String?
+  aiDescription  String?   @map("ai_description")
+  aiConfidence   Float?    @map("ai_confidence")
+  aiTags         String[]  @default([]) @map("ai_tags")
+  orderIndex     Int       @default(0) @map("order_index")
+  manufacturer   String?
+  model          String?
+  serialNumber   String?   @map("serial_number")
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(6)
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization      Mobilization        @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+  photos            Photo[]
+  videos            Video[]
+  documents         Document[]
+  aiAnalyses        AiAnalysis[]
+  ocrResults        OcrResult[]
+  detectedEquipment DetectedEquipment[]
+
+  @@index([mobilizationId, category])
+  @@map("evidences")
+}
+
+/// Foto de uma evidência.
+model Photo {
+  id           Int      @id @default(autoincrement())
+  evidenceId   Int      @map("evidence_id")
+  url          String
+  thumbnailUrl String?  @map("thumbnail_url")
+  mimeType     String?  @map("mime_type")
+  sizeBytes    Int?     @map("size_bytes")
+  width        Int?
+  height       Int?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@map("photos")
+}
+
+/// Vídeo de uma evidência.
+model Video {
+  id           Int      @id @default(autoincrement())
+  evidenceId   Int      @map("evidence_id")
+  url          String
+  thumbnailUrl String?  @map("thumbnail_url")
+  mimeType     String?  @map("mime_type")
+  sizeBytes    Int?     @map("size_bytes")
+  durationMs   Int?     @map("duration_ms")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@map("videos")
+}
+
+/// Documento de uma evidência.
+model Document {
+  id         Int      @id @default(autoincrement())
+  evidenceId Int      @map("evidence_id")
+  url        String
+  mimeType   String?  @map("mime_type")
+  sizeBytes  Int?     @map("size_bytes")
+  filename   String?  @map("filename")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@map("documents")
+}
+
+// ---------------------------------------------------------------------------
+// Equipamentos
+// ---------------------------------------------------------------------------
+
+/// Equipamento cadastrado em uma mobilização.
+model Equipment {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  vesselId       Int?     @map("vessel_id")
+  name           String
+  manufacturer   String?
+  model          String?
+  serialNumber   String?  @map("serial_number")
+  category       String?
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+  vessel       Vessel?      @relation(fields: [vesselId], references: [id], onDelete: SetNull)
+
+  @@index([mobilizationId])
+  @@index([vesselId])
+  @@map("equipments")
+}
+
+/// Equipamento detectado pela IA em uma evidência.
+model DetectedEquipment {
+  id           Int      @id @default(autoincrement())
+  evidenceId   Int      @map("evidence_id")
+  name         String
+  manufacturer String?
+  model        String?
+  confidence   Float?
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@map("detected_equipment")
+}
+
+// ---------------------------------------------------------------------------
+// Inteligência Artificial
+// ---------------------------------------------------------------------------
+
+/// Análise de IA aplicada a uma evidência.
+model AiAnalysis {
+  id         Int          @id @default(autoincrement())
+  evidenceId Int          @map("evidence_id")
+  type       AnalysisType
+  provider   String       @default("openai")
+  model      String?
+  input      Json?
+  output     Json?
+  confidence Float?
+  latencyMs  Int?         @map("latency_ms")
+  status     String       @default("COMPLETED")
+  error      String?
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId, type])
+  @@map("ai_analyses")
+}
+
+/// Resultado de OCR extraído de uma evidência.
+model OcrResult {
+  id         Int      @id @default(autoincrement())
+  evidenceId Int      @map("evidence_id")
+  text       String
+  confidence Float?
+  language   String?  @default("por")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@index([evidenceId])
+  @@map("ocr_results")
+}
+
+/// Memória técnica permanente por embarcação (embeddings + histórico).
+model TechnicalMemory {
+  id          Int      @id @default(autoincrement())
+  vesselId    Int      @map("vessel_id")
+  reportId    Int?     @map("report_id")
+  contentType String   @default("TEXT") @map("content_type")
+  content     String
+  embedding   Json?
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vessel Vessel  @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  report Report? @relation(fields: [reportId], references: [id], onDelete: SetNull)
+
+  @@index([vesselId, createdAt])
+  @@map("technical_memories")
+}
+
+// ---------------------------------------------------------------------------
+// Testes, Pendências, Diagnósticos, Materiais, Inventário
+// ---------------------------------------------------------------------------
+
+/// Teste executado em uma mobilização.
+model Test {
+  id             Int       @id @default(autoincrement())
+  mobilizationId Int       @map("mobilization_id")
+  name           String
+  description    String?
+  result         String?
+  executedAt     DateTime? @map("executed_at") @db.Timestamptz(6)
+  evidence       String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId])
+  @@map("tests")
+}
+
+/// Pendência técnica de uma mobilização.
+model PendingIssue {
+  id             Int           @id @default(autoincrement())
+  mobilizationId Int           @map("mobilization_id")
+  system         String
+  description    String
+  responsible    String?
+  suggestedByAi  Boolean       @default(false) @map("suggested_by_ai")
+  status         PendingStatus @default(OPEN)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  version        Int           @default(1)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId, status])
+  @@map("pending_issues")
+}
+
+/// Diagnóstico técnico de uma mobilização.
+model Diagnostic {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  system         String
+  description    String
+  severity       String?  @default("INFO")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId])
+  @@map("diagnostics")
+}
+
+/// Material utilizado em uma mobilização.
+model Material {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  name           String
+  quantity       Int      @default(1)
+  unit           String?
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId])
+  @@map("materials")
+}
+
+/// Item de inventário de uma mobilização.
+model Inventory {
+  id             Int      @id @default(autoincrement())
+  mobilizationId Int      @map("mobilization_id")
+  name           String
+  category       String?
+  quantity       Int      @default(1)
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  mobilization Mobilization @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+
+  @@index([mobilizationId])
+  @@map("inventory")
+}
+
+// ---------------------------------------------------------------------------
+// Relatórios e Assinaturas
+// ---------------------------------------------------------------------------
+
+/// Relatório técnico — o banco é a fonte da verdade; o PDF é representação visual.
+model Report {
+  id             Int       @id @default(autoincrement())
+  mobilizationId Int       @map("mobilization_id")
+  title          String
+  reportCode     String    @map("report_code")
+  summary        String?
+  conclusion     String?
+  content        String
+  metadata       Json?
+  shareToken     String?   @unique @map("share_token")
+  shareExpiresAt DateTime? @map("share_expires_at") @db.Timestamptz(6)
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  mobilization Mobilization      @relation(fields: [mobilizationId], references: [id], onDelete: Cascade)
+  signatures   Signature[]
+  memories     TechnicalMemory[]
+
+  @@index([mobilizationId])
+  @@map("reports")
+}
+
+/// Assinatura digital de um relatório.
+model Signature {
+  id            Int      @id @default(autoincrement())
+  reportId      Int      @map("report_id")
+  role          String
+  name          String
+  signatureData String?  @map("signature_data")
+  signedAt      DateTime @default(now()) @map("signed_at") @db.Timestamptz(6)
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@map("signatures")
+}
+
+// ---------------------------------------------------------------------------
+// Infraestrutura: Notificações, Configurações, Auditoria
+// ---------------------------------------------------------------------------
+
+/// Notificação enviada pela plataforma.
+model Notification {
+  id         Int                @id @default(autoincrement())
+  companyId  Int?               @map("company_id")
+  userId     Int?               @map("user_id")
+  channel    String             @default("EMAIL")
+  subject    String
+  body       String
+  status     NotificationStatus @default(PENDING)
+  externalId String?            @map("external_id")
+  error      String?
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt     DateTime?          @map("sent_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@map("notifications")
+}
+
+/// Configuração da plataforma (chave-valor).
+model Configuration {
+  id        Int      @id @default(autoincrement())
+  companyId Int?     @map("company_id")
+  key       String
+  value     Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+  @@map("configurations")
+}
+
+/// Trilha de auditoria (polimórfica): quem, o quê, em quê, quando.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  companyId  Int?     @map("company_id")
+  actorType  String   @map("actor_type")
+  actorId    String?  @map("actor_id")
+  actorLabel String?  @map("actor_label")
+  action     String
+  status     String   @default("OK")
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

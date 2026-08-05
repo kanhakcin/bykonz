@@ -1,0 +1,40 @@
+﻿node.exe : warn The configuration 
+property `package.json#prisma` is 
+deprecated and will be removed in 
+Prisma 7. Please migrate to a 
+Prisma config file (e.g., 
+`prisma.config.ts`).
+No linha:1 caractere:1
++ & "C:\Program 
+Files\nodejs/node.exe" "C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~
+    + CategoryInfo          : NotS 
+   pecified: (warn The config...m  
+  a.config.ts`).:String) [], Rem   
+ oteException
+    + FullyQualifiedErrorId : Nati 
+   veCommandError
+ 
+For more information, see: 
+https://pris.ly/prisma-config
+
+Environment variables loaded from 
+.env
+Prisma schema loaded from prisma\schema.prisma
+Datasource "db": PostgreSQL database "diario_obra", schema "public" at "localhost:5432"
+
+Applying migration `20260804120000_add_technical_reports`
+
+The following migration(s) have been applied:
+
+migrations/
+  ÔööÔöÇ 20260804120000_add_technical_reports/
+    ÔööÔöÇ migration.sql
+
+ÔÜá´©Å  Warnings for the current datasource:
+
+  ÔÇó A unique constraint covering the columns `[share_token]` on the table `technical_reports` will be added. If there are existing duplicate values, this will fail.
+

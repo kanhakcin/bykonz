@@ -17,6 +17,12 @@ interface AppOptions {
   webhookRateLimit?: number;
   /** Router da API do painel do gestor, montado em /api/v1. */
   panelRouter?: express.Router;
+  /** Router extra para funcionalidades do painel. */
+  panelRouterExtra?: express.Router;
+  /** Router de embarcações e mobilizações. */
+  vesselRouter?: express.Router;
+  /** Router do assistente de IA para análise automática de evidências. */
+  vesselAiRouter?: express.Router;
   /** Secret token que o Telegram devolve no header ao chamar o webhook. */
   telegramWebhookSecret?: string;
 }
@@ -90,6 +96,18 @@ export function createApp(
 
   if (options.panelRouter) {
     app.use("/api/v1", options.panelRouter);
+  }
+
+  if (options.panelRouterExtra) {
+    app.use("/api/v1", options.panelRouterExtra);
+  }
+
+  if (options.vesselRouter) {
+    app.use("/api/v1", options.vesselRouter);
+  }
+
+  if (options.vesselAiRouter) {
+    app.use("/api/v1", options.vesselAiRouter);
   }
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

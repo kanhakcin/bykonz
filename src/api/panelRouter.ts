@@ -43,7 +43,10 @@ export function createPanelRouter(service: PanelService, options: PanelRouterOpt
 
   router.use(
     cors({
-      origin: options.corsOrigins ?? ["http://localhost:5173"],
+      origin: options.corsOrigins ?? [
+  "http://localhost:5173",
+  "http://localhost:5176"
+],
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Authorization", "Content-Type"],
       // Permite o frontend ler o nome do arquivo do diário mesmo em cross-origin.

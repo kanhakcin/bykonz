@@ -21,8 +21,12 @@ interface AppOptions {
   panelRouterExtra?: express.Router;
   /** Router de embarcações e mobilizações. */
   vesselRouter?: express.Router;
-  /** Router do assistente de IA para análise automática de evidências. */
+/** Router do assistente de IA para análise automática de evidências. */
   vesselAiRouter?: express.Router;
+  /** Router do assistente de IA (análise de rascunhos do relatório técnico). */
+  aiAssistantRouter?: express.Router;
+  /** Router de gerenciamento do Telegram (painel). */
+  telegramRouter?: express.Router;
   /** Secret token que o Telegram devolve no header ao chamar o webhook. */
   telegramWebhookSecret?: string;
 }
@@ -106,8 +110,16 @@ export function createApp(
     app.use("/api/v1", options.vesselRouter);
   }
 
-  if (options.vesselAiRouter) {
+if (options.vesselAiRouter) {
     app.use("/api/v1", options.vesselAiRouter);
+  }
+
+if (options.aiAssistantRouter) {
+    app.use("/api/v1", options.aiAssistantRouter);
+  }
+
+  if (options.telegramRouter) {
+    app.use("/api/v1", options.telegramRouter);
   }
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

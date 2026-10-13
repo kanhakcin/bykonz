@@ -3,12 +3,16 @@ import { createPanelRouter } from "./api/panelRouter";
 import { createTechnicalReportRouter } from "./api/technicalReportRouter";
 import { createVesselRouter } from "./api/vesselRouter";
 import { createVesselAiRouter } from "./api/vesselAiRouter";
+import { createAiAssistantRouter } from "./api/aiAssistantRouter";
+import { createTelegramRouter } from "./api/telegramServiceRouter";
 import { loadConfig } from "./config/env";
 import { createConversationService, createPanelService, createDailyReportJobDeps } from "./container";
 import { prisma } from "./lib/prisma";
 import { scheduleDailyReportJob } from "./jobs/dailyReportJob";
 import { TechnicalReportService } from "./services/technicalReportService";
 import { VesselReportService } from "./services/vesselReportService";
+import { createAIService } from "./services/aiService";
+import { TelegramManagementService } from "./services/telegramManagementService";
 
 const config = loadConfig();
 
@@ -27,6 +31,12 @@ if (config.panelJwtSecret) {
 const technicalReportRouter = createTechnicalReportRouter(new TechnicalReportService());
 const vesselRouter = createVesselRouter(new VesselReportService());
 const vesselAiRouter = createVesselAiRouter();
+const aiAssistantRouter = createAiAssistantRouter(createAIService(config), {
+  jwtSecret: config.panelJwtSecret ?? ""
+});
+const telegramRouter = createTelegramRouter(new TelegramManagementService(), {
+  jwtSecret: config.panelJwtSecret ?? ""
+});
 
 const app = createApp(createConversationService(config), config.webhookSecret, {
   panelRouter,
@@ -34,6 +44,8 @@ const app = createApp(createConversationService(config), config.webhookSecret, {
   panelRouterExtra: technicalReportRouter,
   vesselRouter,
   vesselAiRouter,
+  aiAssistantRouter,
+  telegramRouter,
 });
 const PORT = process.env.PORT || 8080;
 

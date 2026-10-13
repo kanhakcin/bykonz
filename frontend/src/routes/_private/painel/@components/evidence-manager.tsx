@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, FileText, Film, ImagePlus, Loader2, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,14 +30,7 @@ export const EVIDENCE_CATEGORIES = [
   'Pendências',
 ] as const;
 
-export const ATTENDANCE_TYPES = [
-  'SITE_SURVEY',
-  'INSTALLATION',
-  'MAINTENANCE',
-  'DIAGNOSIS',
-  'COMMISSIONING',
-  'TECHNICAL_SUPPORT',
-] as const;
+export const ATTENDANCE_TYPES = ['SITE_SURVEY', 'INSTALLATION', 'MAINTENANCE', 'DIAGNOSIS', 'COMMISSIONING', 'TECHNICAL_SUPPORT'] as const;
 
 interface Evidence {
   id: number;
@@ -69,6 +62,7 @@ interface Mobilization {
   status?: string | null;
   evidences?: Evidence[];
   inventory?: { id: number; name: string; quantity?: number }[];
+  pendingIssues?: PendingIssue[];
   reports?: { id: number; reportCode: string }[];
 }
 
@@ -121,7 +115,7 @@ export function EvidenceManager() {
   useEffect(() => {
     if (!projectId) return;
     void loadMobilizations(projectId);
-  }, [projectId]);
+  }, [projectId, loadMobilizations]);
 
   async function loadMobilizations(id: number) {
     setLoading(true);
@@ -203,7 +197,7 @@ export function EvidenceManager() {
       setAiResult(result);
       setAiDescription(result.aiSummary);
       if (!evidenceCategory) setEvidenceCategory(result.category);
-    } catch (error) {
+    } catch (_error) {
       toast.error('Falha na análise de IA da evidência');
     } finally {
       setAiAnalyzing(false);
@@ -294,7 +288,7 @@ export function EvidenceManager() {
   return (
     <Card>
       <CardHeader title="Relatórios Inteligentes — Evidências">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
           <Sparkles className="size-4" />
           Foto → IA → descrição técnica → relatório
         </div>
@@ -302,12 +296,7 @@ export function EvidenceManager() {
       <CardContent className="space-y-4">
         {/* Project selector */}
         <div className="flex gap-2">
-          <Input
-            type="number"
-            placeholder="ID do projeto"
-            value={projectInput}
-            onChange={(e) => setProjectInput(e.target.value)}
-          />
+          <Input type="number" placeholder="ID do projeto" value={projectInput} onChange={(e) => setProjectInput(e.target.value)} />
           <Button onClick={() => setProjectId(Number(projectInput))} disabled={!projectInput}>
             Carregar
           </Button>
@@ -329,10 +318,7 @@ export function EvidenceManager() {
                 </div>
                 <div>
                   <Label>Tipo de atendimento</Label>
-                  <Select
-                    value={mobForm.attendanceType}
-                    onValueChange={(v) => setMobForm({ ...mobForm, attendanceType: v })}
-                  >
+                  <Select value={mobForm.attendanceType} onValueChange={(v) => setMobForm({ ...mobForm, attendanceType: v })}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Selecione o tipo" />
                     </SelectTrigger>
@@ -370,12 +356,12 @@ export function EvidenceManager() {
             {/* Mobilization list */}
             <div className="space-y-2">
               <h3 className="font-semibold">Mobilizações</h3>
-              {mobilizations.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma mobilização.</p>}
+              {mobilizations.length === 0 && <p className="text-muted-foreground text-sm">Nenhuma mobilização.</p>}
               {mobilizations.map((mob) => (
                 <div key={mob.id} className="flex items-center justify-between rounded border p-3">
                   <div>
                     <div className="font-semibold">{mob.reportCode}</div>
-                    <div className="text-sm text-muted-foreground">
+                    <div className="text-muted-foreground text-sm">
                       {mob.vesselName || mob.clientName || 'Sem dados'} · {mob.attendanceType || mob.serviceType || '—'}
                     </div>
                   </div>
@@ -392,7 +378,7 @@ export function EvidenceManager() {
                 <div className="mb-3 flex items-center justify-between">
                   <div>
                     <div className="font-semibold">{selectedMobilization.reportCode}</div>
-                    <div className="text-sm text-muted-foreground">
+                    <div className="text-muted-foreground text-sm">
                       {selectedMobilization.vesselName} · {selectedMobilization.siteLocation} · {selectedMobilization.technicianName}
                     </div>
                   </div>
@@ -416,7 +402,7 @@ export function EvidenceManager() {
 
                 {/* Grouped evidence */}
                 <div className="mt-4 space-y-4">
-                  {groupedEvidences.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma evidência registrada.</p>}
+                  {groupedEvidences.length === 0 && <p className="text-muted-foreground text-sm">Nenhuma evidência registrada.</p>}
                   {groupedEvidences.map(([category, evidences]) => (
                     <div key={category}>
                       <h4 className="mb-2 font-semibold text-sm">{category}</h4>
@@ -436,7 +422,7 @@ export function EvidenceManager() {
                               )}
                             </div>
                             {ev.manufacturer && (
-                              <p className="mt-2 text-sm text-muted-foreground">
+                              <p className="mt-2 text-muted-foreground text-sm">
                                 {ev.manufacturer} {ev.model ? `· ${ev.model}` : ''} {ev.serialNumber ? `· SN ${ev.serialNumber}` : ''}
                               </p>
                             )}
@@ -456,7 +442,7 @@ export function EvidenceManager() {
                 {/* Pending issues */}
                 <div className="mt-4">
                   <h4 className="mb-2 font-semibold text-sm">Pendências ({pendingIssues.length})</h4>
-                  {pendingIssues.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma pendência.</p>}
+                  {pendingIssues.length === 0 && <p className="text-muted-foreground text-sm">Nenhuma pendência.</p>}
                   {pendingIssues.map((issue) => (
                     <div key={issue.id} className="mb-2 rounded border p-2 text-sm">
                       <div className="flex items-center gap-2">
@@ -483,7 +469,7 @@ export function EvidenceManager() {
           </DialogHeader>
           <div className="space-y-3">
             <div
-              className="flex cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-input px-6 py-10"
+              className="flex cursor-pointer flex-col items-center justify-center rounded-md border border-input border-dashed px-6 py-10"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -504,16 +490,10 @@ export function EvidenceManager() {
               ) : (
                 <>
                   <ImagePlus className="size-8 text-muted-foreground" />
-                  <span className="mt-2 text-sm text-muted-foreground">Arraste a foto ou clique para selecionar</span>
+                  <span className="mt-2 text-muted-foreground text-sm">Arraste a foto ou clique para selecionar</span>
                 </>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="sr-only"
-                accept="image/*,video/*,.pdf,.doc,.docx"
-                onChange={handleFileChange}
-              />
+              <input ref={fileInputRef} type="file" className="sr-only" accept="image/*,video/*,.pdf,.doc,.docx" onChange={handleFileChange} />
             </div>
 
             <div>
@@ -546,9 +526,7 @@ export function EvidenceManager() {
               <div className="rounded-md border bg-muted/40 p-3">
                 <div className="flex items-center gap-2">
                   <Badge variant="violet">IA</Badge>
-                  <Badge variant={aiResult.confidence > 0.7 ? 'success' : 'warning'}>
-                    Confiança {Math.round(aiResult.confidence * 100)}%
-                  </Badge>
+                  <Badge variant={aiResult.confidence > 0.7 ? 'success' : 'warning'}>Confiança {Math.round(aiResult.confidence * 100)}%</Badge>
                 </div>
                 {aiResult.aiTags.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -561,11 +539,7 @@ export function EvidenceManager() {
                 )}
                 <Label className="mt-2 block text-xs">Descrição técnica gerada (editável)</Label>
                 <Textarea className="mt-1" value={aiDescription} onChange={(e) => setAiDescription(e.target.value)} />
-                {aiResult.suggestedEquipment.length > 0 && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Equipamentos: {aiResult.suggestedEquipment.join(', ')}
-                  </p>
-                )}
+                {aiResult.suggestedEquipment.length > 0 && <p className="mt-2 text-muted-foreground text-xs">Equipamentos: {aiResult.suggestedEquipment.join(', ')}</p>}
               </div>
             )}
           </div>

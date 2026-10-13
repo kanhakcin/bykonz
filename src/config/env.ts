@@ -29,11 +29,15 @@ export interface AppConfig {
   smtpPass: string | undefined;
   smtpFrom: string | undefined;
   smtpSecure: boolean;
-  /** OpenAI — opcional; presente apenas se OPENAI_API_KEY existir. */
+/** OpenAI — opcional; presente apenas se OPENAI_API_KEY existir. */
   openaiApiKey: string | undefined;
   openaiModel: string | undefined;
   openaiVisionModel: string | undefined;
   openaiEmbeddingModel: string | undefined;
+  /** Provedor de IA (openai | gemini | claude). O padrão é openai. */
+  aiProvider: string;
+  /** Timeout (ms) das chamadas à IA; padrão 30s. */
+  aiTimeoutMs: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -99,11 +103,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // pela porta (465 → secure). Evita o clássico "Greeting never received" quando
     // a porta e o modo TLS ficam incompatíveis.
     smtpSecure: parseSmtpSecure(env.SMTP_SECURE, smtpPort),
-    openaiApiKey: env.OPENAI_API_KEY,
+openaiApiKey: env.OPENAI_API_KEY,
     openaiModel: env.OPENAI_MODEL ?? "gpt-4o-mini",
     openaiVisionModel: env.OPENAI_VISION_MODEL ?? "gpt-4o-mini",
-    openaiEmbeddingModel: env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small"
+    openaiEmbeddingModel: env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small",
+    aiProvider: env.AI_PROVIDER ?? "openai",
+    aiTimeoutMs: parsePositiveInt(env.AI_TIMEOUT_MS, 30_000)
   };
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function parseSmtpSecure(value: string | undefined, port: number): boolean {

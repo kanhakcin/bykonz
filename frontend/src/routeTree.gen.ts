@@ -13,6 +13,7 @@ import { Route as PublicRouteImport } from './routes/_public';
 import { Route as PrivateRouteImport } from './routes/_private';
 import { Route as PrivateIndexRouteImport } from './routes/_private/index';
 import { Route as PublicAuthIndexRouteImport } from './routes/_public/auth/index';
+import { Route as PrivateTelegramIndexRouteImport } from './routes/_private/telegram/index';
 import { Route as PrivateRelatoriosIndexRouteImport } from './routes/_private/relatorios/index';
 import { Route as PrivatePainelIndexRouteImport } from './routes/_private/painel/index';
 import { Route as PrivateLogsIndexRouteImport } from './routes/_private/logs/index';
@@ -46,6 +47,11 @@ const PublicAuthIndexRoute = PublicAuthIndexRouteImport.update({
   id: '/auth/',
   path: '/auth/',
   getParentRoute: () => PublicRoute,
+} as any);
+const PrivateTelegramIndexRoute = PrivateTelegramIndexRouteImport.update({
+  id: '/telegram/',
+  path: '/telegram/',
+  getParentRoute: () => PrivateRoute,
 } as any);
 const PrivateRelatoriosIndexRoute = PrivateRelatoriosIndexRouteImport.update({
   id: '/relatorios/',
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/logs/': typeof PrivateLogsIndexRoute;
   '/painel/': typeof PrivatePainelIndexRoute;
   '/relatorios/': typeof PrivateRelatoriosIndexRoute;
+  '/telegram/': typeof PrivateTelegramIndexRoute;
   '/auth/': typeof PublicAuthIndexRoute;
   '/cadastros/ativos/': typeof PrivateCadastrosAtivosIndexRoute;
   '/cadastros/normas/': typeof PrivateCadastrosNormasIndexRoute;
@@ -159,6 +166,7 @@ export interface FileRoutesByTo {
   '/logs': typeof PrivateLogsIndexRoute;
   '/painel': typeof PrivatePainelIndexRoute;
   '/relatorios': typeof PrivateRelatoriosIndexRoute;
+  '/telegram': typeof PrivateTelegramIndexRoute;
   '/auth': typeof PublicAuthIndexRoute;
   '/cadastros/ativos': typeof PrivateCadastrosAtivosIndexRoute;
   '/cadastros/normas': typeof PrivateCadastrosNormasIndexRoute;
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   '/_private/logs/': typeof PrivateLogsIndexRoute;
   '/_private/painel/': typeof PrivatePainelIndexRoute;
   '/_private/relatorios/': typeof PrivateRelatoriosIndexRoute;
+  '/_private/telegram/': typeof PrivateTelegramIndexRoute;
   '/_public/auth/': typeof PublicAuthIndexRoute;
   '/_private/cadastros/ativos/': typeof PrivateCadastrosAtivosIndexRoute;
   '/_private/cadastros/normas/': typeof PrivateCadastrosNormasIndexRoute;
@@ -202,6 +211,7 @@ export interface FileRouteTypes {
     | '/logs/'
     | '/painel/'
     | '/relatorios/'
+    | '/telegram/'
     | '/auth/'
     | '/cadastros/ativos/'
     | '/cadastros/normas/'
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | '/logs'
     | '/painel'
     | '/relatorios'
+    | '/telegram'
     | '/auth'
     | '/cadastros/ativos'
     | '/cadastros/normas'
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | '/_private/logs/'
     | '/_private/painel/'
     | '/_private/relatorios/'
+    | '/_private/telegram/'
     | '/_public/auth/'
     | '/_private/cadastros/ativos/'
     | '/_private/cadastros/normas/'
@@ -290,6 +302,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth/';
       preLoaderRoute: typeof PublicAuthIndexRouteImport;
       parentRoute: typeof PublicRoute;
+    };
+    '/_private/telegram/': {
+      id: '/_private/telegram/';
+      path: '/telegram';
+      fullPath: '/telegram/';
+      preLoaderRoute: typeof PrivateTelegramIndexRouteImport;
+      parentRoute: typeof PrivateRoute;
     };
     '/_private/relatorios/': {
       id: '/_private/relatorios/';
@@ -405,6 +424,7 @@ interface PrivateRouteChildren {
   PrivateLogsIndexRoute: typeof PrivateLogsIndexRoute;
   PrivatePainelIndexRoute: typeof PrivatePainelIndexRoute;
   PrivateRelatoriosIndexRoute: typeof PrivateRelatoriosIndexRoute;
+  PrivateTelegramIndexRoute: typeof PrivateTelegramIndexRoute;
   PrivateCadastrosAtivosIndexRoute: typeof PrivateCadastrosAtivosIndexRoute;
   PrivateCadastrosNormasIndexRoute: typeof PrivateCadastrosNormasIndexRoute;
   PrivateCadastrosObrasIndexRoute: typeof PrivateCadastrosObrasIndexRoute;
@@ -424,6 +444,7 @@ const PrivateRouteChildren: PrivateRouteChildren = {
   PrivateLogsIndexRoute: PrivateLogsIndexRoute,
   PrivatePainelIndexRoute: PrivatePainelIndexRoute,
   PrivateRelatoriosIndexRoute: PrivateRelatoriosIndexRoute,
+  PrivateTelegramIndexRoute: PrivateTelegramIndexRoute,
   PrivateCadastrosAtivosIndexRoute: PrivateCadastrosAtivosIndexRoute,
   PrivateCadastrosNormasIndexRoute: PrivateCadastrosNormasIndexRoute,
   PrivateCadastrosObrasIndexRoute: PrivateCadastrosObrasIndexRoute,
